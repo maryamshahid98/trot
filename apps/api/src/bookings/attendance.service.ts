@@ -3,12 +3,14 @@ import { decideNoShow, MS } from '@trot/domain';
 import type { AuthUser } from '../auth/decorators.ts';
 import { loadPolicy } from '../common/policy.ts';
 import { writeAudit } from '../common/audit.ts';
+import { errorMessage } from '../common/errors.ts';
 import { epochMs } from '../common/sql.ts';
 import { parse } from '../common/validate.ts';
 import {
   AUDIT, BOOKING_STATUS, ENTITY, FLOW_PROBLEM, LIMITS, OCCURRENCE_STATUS, PAY_WITH, RIDER_STATUS, ROLE, WAITLIST_STATUS,
 } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
+import { queueForRider } from '../notifications/outbox.ts';
 import { CancelClass, CompleteClass, IdParam } from './bookings.schemas.ts';
 import { lockOccurrence, returnPackageClass, toBooking, toOccurrence } from './core.ts';
 import type { Tx } from '../common/sql.ts';
@@ -97,6 +99,41 @@ export class AttendanceService {
     });
   }
 
+  /**
+   * Cancels every date of a repeating class that has not started yet, each one exactly as a single class is cancelled
+   * (riders told it was the club's doing, package classes returned). A date that cannot be cancelled is reported, and the rest still are.
+   */
+  async cancelSeries(rawSeriesId: string, body: unknown, user: AuthUser) {
+    const { id } = parse(IdParam, { id: rawSeriesId });
+    parse(CancelClass, body); // check the reason before touching anything
+    const found = await this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+      const series = await c.query(`SELECT branch_id AS "branchId" FROM schedule_series WHERE id = $1`, [id]);
+      if (series.rowCount === 0) throw new NotFoundException('Series not found.');
+      const rows = (
+        await c.query(
+          `SELECT id FROM occurrences WHERE series_id = $1 AND status = ANY($2::occurrence_status[]) AND lower(during) > now() ORDER BY lower(during)`,
+          [id, [OCCURRENCE_STATUS.DRAFT, OCCURRENCE_STATUS.PUBLISHED]],
+        )
+      ).rows;
+      return { branchId: series.rows[0].branchId as string, rows };
+    });
+    const upcoming = found.rows;
+    const cancelled: string[] = [];
+    const failed: { id: string; message: string }[] = [];
+    for (const o of upcoming) {
+      try {
+        await this.cancelClass(o.id, body, user);
+        cancelled.push(o.id);
+      } catch (e: unknown) {
+        failed.push({ id: o.id, message: errorMessage(e) });
+      }
+    }
+    await this.db.scoped({ branchIds: user.branchIds, role: user.role }, (c) =>
+      writeAudit(c, user, found.branchId, AUDIT.SERIES_CANCEL, ENTITY.OCCURRENCE, id, { cancelled: cancelled.length, failed: failed.length }),
+    );
+    return { seriesId: id, cancelled: cancelled.length, failed };
+  }
+
   /** Cancels a whole class. Every rider is told it was the club's doing, so nobody pays, and every package class comes back. */
   async cancelClass(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
@@ -108,13 +145,14 @@ export class AttendanceService {
         throw new ConflictException(problem(`A ${occRow.status} class cannot be cancelled.`, FLOW_PROBLEM.CLASS_NOT_CANCELLABLE));
       }
       const bookings = (
-        await c.query(`SELECT id, status, pay_with AS "payWith", rider_package_id AS "packageId" FROM bookings WHERE occurrence_id = $1 AND status = ANY($2::booking_status[]) FOR UPDATE`, [
+        await c.query(`SELECT id, rider_id AS "riderId", status, pay_with AS "payWith", rider_package_id AS "packageId" FROM bookings WHERE occurrence_id = $1 AND status = ANY($2::booking_status[]) FOR UPDATE`, [
           id, [BOOKING_STATUS.PENDING_OFFICE_PAYMENT, BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN],
         ])
       ).rows;
       let returned = 0;
       for (const b of bookings) {
         await c.query(`UPDATE bookings SET status = $2, cancelled_at = now(), cancel_cause = $3, consumed_class = false WHERE id = $1`, [b.id, BOOKING_STATUS.CANCELLED, cause]);
+        await queueForRider(c, b.riderId, { event: 'class.cancelled', branchId: occRow.branchId, occurrenceId: id, dedupeKey: `booking:${b.id}:class_cancelled`, data: { reason } });
         // An unpaid office booking never spent a class, so there is nothing to give back.
         if (b.payWith === PAY_WITH.PACKAGE && b.packageId && b.status !== BOOKING_STATUS.PENDING_OFFICE_PAYMENT) {
           await returnPackageClass(c, b.packageId, b.id, user.id);

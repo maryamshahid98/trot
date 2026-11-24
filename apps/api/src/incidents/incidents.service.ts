@@ -7,6 +7,7 @@ import type { Row } from '../common/sql.ts';
 import { parse } from '../common/validate.ts';
 import { AUDIT, ENTITY, INCIDENT_PROBLEM, INCIDENT_SEVERITY, INCIDENT_STATUS, INCIDENT_TRANSITIONS, LIMITS, ROLE } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
+import { branchManagers, queueForAccounts } from '../notifications/outbox.ts';
 import { CreateIncident, IdParam, ListIncidents, SetIncidentStatus } from './incidents.schemas.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
@@ -37,6 +38,10 @@ export class IncidentsService {
           branchId, b.severity, b.kind, b.riderId ?? null, b.horseId ?? null, b.description, user.id, new Date(occurredAt).toISOString(),
         ])
       ).rows[0].id;
+      if (b.severity === 'high' || b.severity === 'critical') {
+        // Management is told at once (BRD 10.2). Only the severity and a reference are sent, never the description.
+        await queueForAccounts(c, (await branchManagers(c, branchId)).filter((m) => m !== user.id), { event: 'incident.escalated', branchId, dedupeKey: `incident:${id}:created`, data: { severity: b.severity, reference: id.slice(0, 8) } });
+      }
       await writeAudit(c, user, branchId, AUDIT.INCIDENT_CREATE, ENTITY.INCIDENT, id, { severity: b.severity, kind: b.kind, riderId: b.riderId ?? null, horseId: b.horseId ?? null });
       return { id, status: INCIDENT_STATUS.OPEN };
     });

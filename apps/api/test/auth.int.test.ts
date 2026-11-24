@@ -2,6 +2,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SignJWT } from 'jose';
+import type { Json } from './helpers.ts';
 import { api, appConfig, ctx, login, resetRateLimits, makeAccount, PASSWORD, startApp, stopApp, tokenFor } from './helpers.ts';
 
 before(startApp);
@@ -51,7 +52,7 @@ test('bad input is a 400, not a crash: missing fields, huge password, wrong type
   assert.equal((await api('POST', '/auth/login', { body: {} })).status, 400);
   assert.equal((await api('POST', '/auth/login', { body: { identifier: 'a@b.invalid', password: 'x'.repeat(5000) } })).status, 400);
   assert.equal((await api('POST', '/auth/login', { body: { identifier: 123, password: ['a'] } })).status, 400);
-  assert.equal((await api('POST', '/auth/login', { body: null as any })).status, 400);
+  assert.equal((await api('POST', '/auth/login', { body: null as Json })).status, 400);
 });
 
 test('SQL-injection style input is just a failed login', async () => {
@@ -82,7 +83,7 @@ test('failures and sign-ins are written to the audit log', async () => {
   await login(a.email, 'Wrong-password-1');
   await login(a.email);
   const r = await ctx.admin.query(`SELECT action FROM audit_log WHERE actor_account_id = $1 ORDER BY id`, [a.id]);
-  assert.deepEqual(r.rows.map((x: any) => x.action), ['auth.login_failed', 'auth.login']);
+  assert.deepEqual(r.rows.map((x) => x.action), ['auth.login_failed', 'auth.login']);
 });
 
 test('sign-in routes are rate limited per address', async () => {
@@ -295,6 +296,27 @@ test('CORS: a listed site is allowed, an unlisted site is not', async () => {
   assert.equal(ok.headers.get('access-control-allow-origin'), 'http://localhost:5173');
   const evil = await api('GET', '/health', { headers: { origin: 'https://evil.example' } });
   assert.equal(evil.headers.get('access-control-allow-origin'), null);
+});
+
+test('CORS preflight: every method and header the website really uses is allowed, for a listed site only', async () => {
+  // A browser asks permission BEFORE sending a request that is not "simple". Tools like curl never ask, so this is only caught here.
+  const ask = (origin: string, method: string, headers: string) =>
+    api('OPTIONS', '/documents/x/file', { headers: { origin, 'access-control-request-method': method, 'access-control-request-headers': headers } });
+  for (const [method, headers] of [
+    ['GET', 'authorization,x-trot-client'], ['POST', 'authorization,content-type,x-trot-client'], ['PATCH', 'authorization,content-type'], ['DELETE', 'authorization'],
+    ['PUT', 'authorization,content-type,x-trot-client'], // assessments, notification preferences, account branches
+    ['PUT', 'authorization,content-type,x-file-name,x-trot-client'], // a document file upload
+  ] as const) {
+    const r = await ask('http://localhost:5173', method, headers);
+    assert.ok(r.status === 204 || r.status === 200, `${method} ${headers}: ${r.status}`);
+    assert.ok((r.headers.get('access-control-allow-methods') ?? '').split(',').map((s) => s.trim()).includes(method), `${method} is allowed`);
+    const allowed = (r.headers.get('access-control-allow-headers') ?? '').toLowerCase().split(',').map((s) => s.trim());
+    for (const h of headers.split(',')) assert.ok(allowed.includes(h), `${h} is allowed`);
+    assert.equal(r.headers.get('access-control-allow-credentials'), 'true');
+  }
+  const evil = await ask('https://evil.example', 'PUT', 'authorization,x-file-name');
+  assert.equal(evil.headers.get('access-control-allow-origin'), null, 'an unlisted site gets nothing');
+  assert.equal(evil.headers.get('access-control-allow-credentials'), null);
 });
 
 test('unknown routes are a clean 404 and the health route is open', async () => {

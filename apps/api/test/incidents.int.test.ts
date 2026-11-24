@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { api, BRANCH, ctx, makeBranch, startApp, stopApp } from './helpers.ts';
 import { codes, DAY, makeRider } from './booking-helpers.ts';
 import { auditActions, customer, post, staff } from './flow-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -74,15 +75,15 @@ describe('who can see which incidents', () => {
     const manager = await staff('manager');
     const mine = (await post('/incidents', a.token, body())).body.id;
     const theirs = (await post('/incidents', b.token, body())).body.id;
-    const listA = (await get('/incidents?limit=200', a.token)).body.incidents.map((i: any) => i.id);
+    const listA = (await get('/incidents?limit=200', a.token)).body.incidents.map((i: Json) => i.id);
     assert.ok(listA.includes(mine) && !listA.includes(theirs));
     assert.equal((await get(`/incidents/${theirs}`, a.token)).status, 404);
     assert.equal((await get(`/incidents/${theirs}/history`, a.token)).status, 404);
-    const listM = (await get('/incidents?limit=200', manager.token)).body.incidents.map((i: any) => i.id);
+    const listM = (await get('/incidents?limit=200', manager.token)).body.incidents.map((i: Json) => i.id);
     assert.ok(listM.includes(mine) && listM.includes(theirs));
     const outsider = await staff('manager', [await makeBranch()]);
     assert.equal((await get(`/incidents/${mine}`, outsider.token)).status, 404);
-    assert.ok(!(await get('/incidents?limit=200', outsider.token)).body.incidents.some((i: any) => i.id === mine));
+    assert.ok(!(await get('/incidents?limit=200', outsider.token)).body.incidents.some((i: Json) => i.id === mine));
     assert.equal((await get(`/incidents/${mine}`)).status, 401);
     assert.equal((await get(`/incidents/${mine}`, (await customer()).token)).status, 403);
     assert.equal((await get('/incidents/not-an-id', manager.token)).status, 400);
@@ -117,7 +118,7 @@ describe('moving an incident along', () => {
     assert.equal((await post(`/incidents/${id}/status`, manager.token, { status: 'closed', note: 'Rider recovered, mounting block fixed' })).status, 201);
     assert.equal(await statusIn(id), 'closed');
     const history = await get(`/incidents/${id}/history`, manager.token);
-    assert.deepEqual(history.body.history.map((h: any) => h.action), ['incident.create', 'incident.status', 'incident.status', 'incident.status', 'incident.status']);
+    assert.deepEqual(history.body.history.map((h: Json) => h.action), ['incident.create', 'incident.status', 'incident.status', 'incident.status', 'incident.status']);
     assert.equal(history.body.history[4].detail.note, 'Rider recovered, mounting block fixed');
   });
 

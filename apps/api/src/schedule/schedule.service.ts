@@ -6,13 +6,13 @@ import {
   Injectable,
   UnprocessableEntityException,
 } from '@nestjs/common';
-import { canOverride, MS, validateOccurrence } from '@trot/domain';
-import type { Blackout, Occurrence } from '@trot/domain';
+import { canOverride, MS, RecurrenceError, validateOccurrence, weeklySlots } from '@trot/domain';
+import type { Blackout, Occurrence, Reason } from '@trot/domain';
 import type { AuthUser } from '../auth/decorators.ts';
 import { parse } from '../common/validate.ts';
 import { ACCOUNT_STATUS, AUDIT, ENTITY, LEAVE_STATUS, LIMITS, OCCURRENCE_STATUS, PG_ERROR, RIDE_FORMAT, ROLE, SCHEDULE_KIND } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
-import { CreateClass, ListQuery } from './schedule.schemas.ts';
+import { CreateClass, CreateSeries, ListQuery } from './schedule.schemas.ts';
 import type { Tx } from '../bookings/core.ts';
 import { pgErrorCode } from '../common/errors.ts';
 
@@ -70,7 +70,7 @@ export class ScheduleService {
         `SELECT o.id, o.title, o.format, o.min_level AS "minLevel", o.status, o.capacity,
                 o.price_minor AS "priceMinor", o.arena_id AS "arenaId", a.name AS "arenaName",
                 o.coach_id AS "coachId", ac.full_name AS "coachName",
-                o.ride_type_id AS "rideTypeId", o.min_age_years AS "minAgeYears",
+                o.ride_type_id AS "rideTypeId", o.min_age_years AS "minAgeYears", o.series_id AS "seriesId",
                 lower(o.during) AS "startsAt", upper(o.during) AS "endsAt"
            FROM occurrences o
            JOIN arenas a ON a.id = o.arena_id
@@ -92,6 +92,80 @@ export class ScheduleService {
   }
 
   /**
+   * A class that repeats every 1 to 4 weeks, at the same clock time in the branch's time zone. Every date goes through the
+   * same checks as a single class (clashes, closures, leave, override rules), all inside ONE transaction:
+   *  - by default, if any date cannot be scheduled nothing is saved and the answer lists the dates that failed;
+   *  - with skipConflicts, the dates that work are saved and the others are reported;
+   *  - with dryRun, nothing is saved and the answer says what would happen.
+   */
+  async createSeries(body: unknown, user: AuthUser) {
+    const b = parse(CreateSeries, body);
+    const branchId = branchFor(b.branchId, user);
+    const override = b.override ? { reason: b.override.reason, byRole: user.role as 'reception' | 'manager' | 'owner', byUserId: user.id } : undefined;
+
+    return this.db.scoped({ branchIds: [branchId], role: user.role }, async (c) => {
+      const tz = (await c.query(`SELECT time_zone FROM branches WHERE id = $1`, [branchId])).rows[0]?.time_zone as string | undefined;
+      if (!tz) throw new BadRequestException('Unknown branch.');
+
+      let slots;
+      try {
+        slots = weeklySlots({ startsAt: Date.parse(b.startsAt), endsAt: Date.parse(b.endsAt) }, { everyWeeks: b.repeat.everyWeeks, count: b.repeat.count, untilDate: b.repeat.until }, tz);
+      } catch (e: unknown) {
+        if (e instanceof RecurrenceError) throw new BadRequestException({ message: e.message, problems: [{ field: 'repeat', message: e.message }] });
+        throw e;
+      }
+
+      let seriesId: string | undefined;
+      if (!b.dryRun) {
+        seriesId = (
+          await c.query(
+            `INSERT INTO schedule_series (branch_id, title, every_weeks, first_starts_at, session_count, created_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+            [branchId, b.title, b.repeat.everyWeeks, iso(slots[0].startsAt), slots.length, user.id],
+          )
+        ).rows[0].id as string;
+      }
+
+      const created: { id: string | null; startsAt: string; endsAt: string; overridden: boolean }[] = [];
+      const skipped: { startsAt: string; endsAt: string; problems: unknown[] }[] = [];
+      const { repeat: _repeat, skipConflicts: _skip, dryRun: _dry, ...single } = b;
+      for (const slot of slots) {
+        const spec: OccurrenceSpec = { ...single, startsAt: iso(slot.startsAt), endsAt: iso(slot.endsAt) };
+        // A savepoint per date: a date the database itself refuses (two people scheduling at the same moment) must not spoil the others.
+        await c.query('SAVEPOINT series_slot');
+        try {
+          const r = await this.place(c, branchId, spec, user, override, undefined, { seriesId, dryRun: b.dryRun });
+          await c.query('RELEASE SAVEPOINT series_slot');
+          created.push({ id: r.id, startsAt: spec.startsAt, endsAt: spec.endsAt, overridden: r.overridden });
+        } catch (e: unknown) {
+          await c.query('ROLLBACK TO SAVEPOINT series_slot');
+          let problems: unknown[];
+          if (e instanceof UnprocessableEntityException) problems = ((e.getResponse() as { problems?: unknown[] }).problems ?? []);
+          else if (pgErrorCode(e) === PG_ERROR.EXCLUSION_VIOLATION) problems = [{ code: 'CLASH', message: 'Someone else just booked that arena or coach at this time.' }];
+          else throw e;
+          skipped.push({ startsAt: spec.startsAt, endsAt: spec.endsAt, problems });
+        }
+      }
+
+      if (!b.dryRun && skipped.length > 0 && !b.skipConflicts) {
+        throw new UnprocessableEntityException({
+          message: `${skipped.length} of ${slots.length} dates cannot be scheduled, so nothing was saved. Fix them, or choose to skip the dates that clash.`,
+          problems: skipped.map((s) => ({ date: s.startsAt, reasons: s.problems })),
+        });
+      }
+      if (!b.dryRun && created.length === 0) throw new UnprocessableEntityException({ message: 'None of the dates can be scheduled.', problems: skipped.map((s) => ({ date: s.startsAt, reasons: s.problems })) });
+
+      if (!b.dryRun) {
+        await c.query(`UPDATE schedule_series SET session_count = $2 WHERE id = $1`, [seriesId, created.length]);
+        await c.query(
+          `INSERT INTO audit_log (actor_account_id, branch_id, action, entity, entity_id, detail) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [user.id, branchId, AUDIT.SERIES_CREATE, ENTITY.OCCURRENCE, seriesId, JSON.stringify({ title: b.title, everyWeeks: b.repeat.everyWeeks, created: created.length, skipped: skipped.length })],
+        );
+      }
+      return { seriesId: seriesId ?? null, dryRun: b.dryRun, created, skipped };
+    });
+  }
+
+  /**
    * The one place a class or a ride is put on the schedule, so both get the same clash, closure, leave and override checks.
    * For a ride, `prepareRide` fills in the price, length, level and minimum age from the ride type, inside the transaction.
    */
@@ -102,83 +176,7 @@ export class ScheduleService {
       : undefined;
 
     try {
-      return await this.db.scoped({ branchIds: [branchId], role: user.role }, async (c) => {
-        let b: OccurrenceSpec = input;
-        let rideTypeId: string | null = null;
-        let minAgeYears: number | null = null;
-        if (prepareRide) {
-          const fill = await prepareRide(c, branchId, input);
-          b = { ...input, ...fill.spec };
-          rideTypeId = fill.rideTypeId;
-          minAgeYears = fill.minAgeYears;
-        }
-        const startsAt = Date.parse(b.startsAt);
-        const endsAt = Date.parse(b.endsAt);
-        const from = iso(Math.min(startsAt, endsAt));
-        const to = iso(Math.max(startsAt, endsAt));
-
-        // The arena and the coach must belong to this branch (row-level security hides other branches' arenas).
-        const arena = await c.query(`SELECT 1 FROM arenas WHERE id = $1`, [b.arenaId]);
-        if (arena.rowCount === 0) throw new BadRequestException('Unknown arena for this branch.');
-        const coach = await c.query(
-          `SELECT 1 FROM accounts a JOIN account_branches ab ON ab.account_id = a.id
-            WHERE a.id = $1 AND ab.branch_id = $2 AND a.role = $3 AND a.status = $4`,
-          [b.coachId, branchId, ROLE.COACH, ACCOUNT_STATUS.ACTIVE],
-        );
-        if (coach.rowCount === 0) throw new BadRequestException('Unknown coach for this branch.');
-
-        const existingRows = await c.query(
-          `SELECT id, ${EPOCH_MS('lower(during)')} AS "startsAt", ${EPOCH_MS('upper(during)')} AS "endsAt",
-                  capacity, arena_id AS "arenaId", coach_id AS "coachId", min_level AS "minLevel",
-                  status, format, price_minor AS "priceMinor"
-             FROM occurrences
-            WHERE branch_id = $1 AND status <> $4
-              AND during && tstzrange($2::timestamptz, $3::timestamptz)`,
-          [branchId, from, to, OCCURRENCE_STATUS.CANCELLED],
-        );
-        const existing: Occurrence[] = existingRows.rows.map((o) => ({ ...o, startsAt: Number(o.startsAt), endsAt: Number(o.endsAt) }));
-
-        const closures = await c.query(
-          `SELECT id, arena_id AS "targetId", ${EPOCH_MS('lower(during)')} AS "from", ${EPOCH_MS('upper(during)')} AS "to"
-             FROM arena_closures WHERE arena_id = $1 AND during && tstzrange($2::timestamptz, $3::timestamptz)`,
-          [b.arenaId, from, to],
-        );
-        const leave = await c.query(
-          `SELECT id, staff_account_id AS "targetId", ${EPOCH_MS('lower(during)')} AS "from", ${EPOCH_MS('upper(during)')} AS "to"
-             FROM staff_unavailability
-            WHERE staff_account_id = $1 AND status = $4 AND during && tstzrange($2::timestamptz, $3::timestamptz)`,
-          [b.coachId, from, to, LEAVE_STATUS.APPROVED],
-        );
-        const blackouts: Blackout[] = [
-          ...closures.rows.map((r) => ({ id: r.id, kind: 'arena_closure' as const, targetId: r.targetId, from: Number(r.from), to: Number(r.to) })),
-          ...leave.rows.map((r) => ({ id: r.id, kind: 'coach_unavailable' as const, targetId: r.targetId, from: Number(r.from), to: Number(r.to) })),
-        ];
-
-        const reasons = validateOccurrence({ id: 'new', startsAt, endsAt, capacity: b.capacity, arenaId: b.arenaId, coachId: b.coachId }, existing, blackouts);
-        const decision = canOverride(reasons, override);
-        if (!decision.ok) {
-          throw new UnprocessableEntityException({ message: decision.message ?? 'This class cannot be scheduled.', problems: reasons });
-        }
-        const overridden = reasons.length > 0;
-
-        const ins = await c.query(
-          `INSERT INTO occurrences (branch_id, title, format, min_level, arena_id, coach_id, during, capacity, price_minor, status, allow_overlap, ride_type_id, min_age_years)
-           VALUES ($1,$2,$3,$4,$5,$6,tstzrange($7::timestamptz,$8::timestamptz),$9,$10,$11,$12,$13,$14) RETURNING id`,
-          [branchId, b.title, b.format, b.minLevel, b.arenaId, b.coachId, iso(startsAt), iso(endsAt), b.capacity, b.priceMinor, b.status, overridden, rideTypeId, minAgeYears],
-        );
-        const id: string = ins.rows[0].id;
-        if (overridden && override) {
-          await c.query(`INSERT INTO occurrence_overrides (occurrence_id, codes, reason, approved_by) VALUES ($1,$2,$3,$4)`, [
-            id, reasons.map((r) => r.code), override.reason, override.byUserId,
-          ]);
-        }
-        await c.query(
-          `INSERT INTO audit_log (actor_account_id, branch_id, action, entity, entity_id, detail) VALUES ($1,$2,$3,$4,$5,$6)`,
-          [user.id, branchId, overridden ? AUDIT.OCCURRENCE_CREATE_OVERRIDE : AUDIT.OCCURRENCE_CREATE, ENTITY.OCCURRENCE, id,
-           JSON.stringify({ title: b.title, format: b.format, rideTypeId, overridden, problems: reasons.map((r) => r.code) })],
-        );
-        return { id, overridden, problems: reasons };
-      });
+      return await this.db.scoped({ branchIds: [branchId], role: user.role }, (c) => this.place(c, branchId, input, user, override, prepareRide));
     } catch (e: unknown) {
       // The database is the last line of defence if two people schedule at the same moment.
       if (pgErrorCode(e) === PG_ERROR.EXCLUSION_VIOLATION) throw new ConflictException('Someone else just booked that arena or coach at this time. Please check the schedule and try again.');
@@ -187,4 +185,92 @@ export class ScheduleService {
       throw e;
     }
   }
+
+  /**
+   * Validates one session and, unless it is only a check, saves it. Runs inside the caller's transaction, so a whole series
+   * can be placed in one go. Throws UnprocessableEntityException (with the reasons) when the session cannot be scheduled.
+   */
+  private async place(
+    c: Tx, branchId: string, input: OccurrenceSpec, user: AuthUser,
+    override: { reason: string; byRole: 'reception' | 'manager' | 'owner'; byUserId: string } | undefined,
+    prepareRide?: PrepareRide, extra: { seriesId?: string; dryRun?: boolean } = {},
+  ): Promise<{ id: string | null; overridden: boolean; problems: Reason[] }> {
+    let b: OccurrenceSpec = input;
+    let rideTypeId: string | null = null;
+    let minAgeYears: number | null = null;
+    if (prepareRide) {
+      const fill = await prepareRide(c, branchId, input);
+      b = { ...input, ...fill.spec };
+      rideTypeId = fill.rideTypeId;
+      minAgeYears = fill.minAgeYears;
+    }
+    const startsAt = Date.parse(b.startsAt);
+    const endsAt = Date.parse(b.endsAt);
+    const from = iso(Math.min(startsAt, endsAt));
+    const to = iso(Math.max(startsAt, endsAt));
+
+    // The arena and the coach must belong to this branch (row-level security hides other branches' arenas).
+    const arena = await c.query(`SELECT 1 FROM arenas WHERE id = $1`, [b.arenaId]);
+    if (arena.rowCount === 0) throw new BadRequestException('Unknown arena for this branch.');
+    const coach = await c.query(
+      `SELECT 1 FROM accounts a JOIN account_branches ab ON ab.account_id = a.id
+        WHERE a.id = $1 AND ab.branch_id = $2 AND a.role = $3 AND a.status = $4`,
+      [b.coachId, branchId, ROLE.COACH, ACCOUNT_STATUS.ACTIVE],
+    );
+    if (coach.rowCount === 0) throw new BadRequestException('Unknown coach for this branch.');
+
+    const existingRows = await c.query(
+      `SELECT id, ${EPOCH_MS('lower(during)')} AS "startsAt", ${EPOCH_MS('upper(during)')} AS "endsAt",
+              capacity, arena_id AS "arenaId", coach_id AS "coachId", min_level AS "minLevel",
+              status, format, price_minor AS "priceMinor"
+         FROM occurrences
+        WHERE branch_id = $1 AND status <> $4
+          AND during && tstzrange($2::timestamptz, $3::timestamptz)`,
+      [branchId, from, to, OCCURRENCE_STATUS.CANCELLED],
+    );
+    const existing: Occurrence[] = existingRows.rows.map((o) => ({ ...(o as Omit<Occurrence, 'startsAt' | 'endsAt'>), startsAt: Number(o.startsAt), endsAt: Number(o.endsAt) }));
+
+    const closures = await c.query(
+      `SELECT id, arena_id AS "targetId", ${EPOCH_MS('lower(during)')} AS "from", ${EPOCH_MS('upper(during)')} AS "to"
+         FROM arena_closures WHERE arena_id = $1 AND during && tstzrange($2::timestamptz, $3::timestamptz)`,
+      [b.arenaId, from, to],
+    );
+    const leave = await c.query(
+      `SELECT id, staff_account_id AS "targetId", ${EPOCH_MS('lower(during)')} AS "from", ${EPOCH_MS('upper(during)')} AS "to"
+         FROM staff_unavailability
+        WHERE staff_account_id = $1 AND status = $4 AND during && tstzrange($2::timestamptz, $3::timestamptz)`,
+      [b.coachId, from, to, LEAVE_STATUS.APPROVED],
+    );
+    const blackouts: Blackout[] = [
+      ...closures.rows.map((r) => ({ id: r.id, kind: 'arena_closure' as const, targetId: r.targetId, from: Number(r.from), to: Number(r.to) })),
+      ...leave.rows.map((r) => ({ id: r.id, kind: 'coach_unavailable' as const, targetId: r.targetId, from: Number(r.from), to: Number(r.to) })),
+    ];
+
+    const reasons = validateOccurrence({ id: 'new', startsAt, endsAt, capacity: b.capacity, arenaId: b.arenaId, coachId: b.coachId }, existing, blackouts);
+    const decision = canOverride(reasons, override);
+    if (!decision.ok) {
+      throw new UnprocessableEntityException({ message: decision.message ?? 'This class cannot be scheduled.', problems: reasons });
+    }
+    const overridden = reasons.length > 0;
+    if (extra.dryRun) return { id: null as string | null, overridden, problems: reasons }; // a check only: nothing is saved
+
+    const ins = await c.query(
+      `INSERT INTO occurrences (branch_id, title, format, min_level, arena_id, coach_id, during, capacity, price_minor, status, allow_overlap, ride_type_id, min_age_years, series_id)
+       VALUES ($1,$2,$3,$4,$5,$6,tstzrange($7::timestamptz,$8::timestamptz),$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+      [branchId, b.title, b.format, b.minLevel, b.arenaId, b.coachId, iso(startsAt), iso(endsAt), b.capacity, b.priceMinor, b.status, overridden, rideTypeId, minAgeYears, extra.seriesId ?? null],
+    );
+    const id: string = ins.rows[0].id;
+    if (overridden && override) {
+      await c.query(`INSERT INTO occurrence_overrides (occurrence_id, codes, reason, approved_by) VALUES ($1,$2,$3,$4)`, [
+        id, reasons.map((r) => r.code), override.reason, override.byUserId,
+      ]);
+    }
+    await c.query(
+      `INSERT INTO audit_log (actor_account_id, branch_id, action, entity, entity_id, detail) VALUES ($1,$2,$3,$4,$5,$6)`,
+      [user.id, branchId, overridden ? AUDIT.OCCURRENCE_CREATE_OVERRIDE : AUDIT.OCCURRENCE_CREATE, ENTITY.OCCURRENCE, id,
+       JSON.stringify({ title: b.title, format: b.format, rideTypeId, overridden, problems: reasons.map((r) => r.code) })],
+    );
+    return { id, overridden, problems: reasons };
+  }
+
 }

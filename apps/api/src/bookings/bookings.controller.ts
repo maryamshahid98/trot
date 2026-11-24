@@ -62,6 +62,9 @@ export class ClassLifecycleController {
   @Post(':id/cancel') @Roles(ROLE.MANAGER, ROLE.OWNER)
   cancel(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.attendance.cancelClass(id, body, user); }
 
+  @Post('series/:seriesId/cancel') @Roles(ROLE.MANAGER, ROLE.OWNER)
+  cancelSeries(@Param('seriesId') seriesId: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.attendance.cancelSeries(seriesId, body, user); }
+
   @Post(':id/waitlist/refresh') @Roles(...STAFF)
   refresh(@Param('id') id: string, @CurrentUser() user: AuthUser) { return this.waitlist.refresh(id, user); }
 }

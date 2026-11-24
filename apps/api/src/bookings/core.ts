@@ -6,6 +6,8 @@ import type { Booking, Occurrence, Policy, Reason, Rider } from '@trot/domain';
 import { dayKeyFor, epochMs } from '../common/sql.ts';
 import type { Row, Tx } from '../common/sql.ts';
 import { writeAudit } from '../common/audit.ts';
+import { queueForRider } from '../notifications/outbox.ts';
+import { ensureBookingInvoice } from '../payments/invoices.ts';
 import {
   AUDIT, BOOKING_STATUS, DOC_KIND, DOC_STATUS, ENTITY, LEDGER_REASON, OCCURRENCE_STATUS, PACKAGE_STATUS, PAY_WITH, PROBLEM, RIDE_FORMAT, WAITLIST_STATUS,
 } from '../config/constants.ts';
@@ -177,6 +179,8 @@ export async function insertBooking(
       [p.branchId, p.occurrenceId, p.riderId, p.status, p.payWith, p.payWith === PAY_WITH.PACKAGE ? p.packageId : null, p.source, p.userId, holdExpiresAt],
     )
   ).rows[0];
+  // Something to pay at the office: invoice it now. (A free class has nothing to invoice; a package booking was invoiced when the package was sold.)
+  if (p.status === BOOKING_STATUS.PENDING_OFFICE_PAYMENT) await ensureBookingInvoice(c, ins.id, p.userId);
   if (p.payWith === PAY_WITH.PACKAGE) {
     await c.query(`INSERT INTO package_ledger (rider_package_id, delta, reason, ref_key, booking_id, by_account) VALUES ($1,-1,$2,$3,$4,$5)`, [
       p.packageId, LEDGER_REASON.USE, `use:${ins.id}`, ins.id, p.userId,
@@ -221,6 +225,7 @@ export async function promoteWaitlist(c: Tx, occ: Occurrence & { branchId: strin
     if (ev.kind !== 'checked' || ev.reasons.length > 0) continue;
     const expires = new Date(now + policy.waitlistOfferMinutes * MS.minute).toISOString();
     await c.query(`UPDATE waitlist_entries SET status = $2, offered_at = $4::timestamptz, offer_expires_at = $3::timestamptz WHERE id = $1`, [w.id, WAITLIST_STATUS.OFFERED, expires, iso]);
+    await queueForRider(c, w.riderId, { event: 'waitlist.offered', branchId: occ.branchId, occurrenceId: occ.id, dedupeKey: `waitlist:${w.id}:offered:${expires}`, data: { offerExpiresAt: expires } });
     await writeAudit(c, actor, occ.branchId, AUDIT.WAITLIST_OFFER, ENTITY.WAITLIST_ENTRY, w.id, { occurrenceId: occ.id, riderId: w.riderId, expiresAt: expires });
     made.push({ entryId: w.id, riderId: w.riderId });
     free--;

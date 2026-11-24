@@ -24,6 +24,9 @@ COPY package.json ./
 COPY packages/domain ./packages/domain
 COPY apps/api ./apps/api
 COPY db ./db
+# Uploaded rider documents live here. Mount a persistent volume at this path (see docs/deployment.md), or they are lost when the container is replaced.
+RUN mkdir -p /data/uploads && chown node:node /data/uploads
+ENV UPLOAD_DIR=/data/uploads
 # The built-in "node" user is not root: a flaw in the API cannot write to the image or install anything.
 USER node
 EXPOSE 3000

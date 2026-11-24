@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { post } from '../../api/client';
 import { RIDER_FILTER_STATUSES } from '../../constants';
 import { useBranch } from '../../lib/branch';
@@ -12,9 +13,14 @@ import { RiderDialog } from './RiderDialog';
 const PAGE = 25;
 export function People() {
   const { branchId, branch } = useBranch();
-  const [q, setQ] = useState('');
+  const [params] = useSearchParams();
+  const urlQ = params.get('q') ?? '';
+  const [q, setQ] = useState(urlQ);
+  const [seenUrlQ, setSeenUrlQ] = useState(urlQ);
   const [status, setStatus] = useState('');
   const [offset, setOffset] = useState(0);
+  // The top search box can send a new search while this screen is already open.
+  if (seenUrlQ !== urlQ) { setSeenUrlQ(urlQ); setQ(urlQ); setOffset(0); }
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const list = useQuery<{ total: number; riders: Rider[] }>(branchId ? `/riders${qs({ branchId, q: q.trim(), status, limit: PAGE, offset })}` : null);

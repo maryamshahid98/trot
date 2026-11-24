@@ -1,7 +1,7 @@
 export interface Occurrence {
   id: string; title: string; format: string; minLevel: string; status: string; capacity: number; priceMinor: number;
   arenaId: string; arenaName: string; coachId: string; coachName: string; rideTypeId: string | null; minAgeYears: number | null;
-  startsAt: string; endsAt: string;
+  startsAt: string; endsAt: string; seriesId?: string | null;
 }
 export interface Rider { id: string; fullName: string; dateOfBirth: string; level: string; status: string; isWalkIn: boolean; createdAt: string }
 export interface RiderDetail extends Rider {

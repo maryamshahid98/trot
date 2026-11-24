@@ -12,6 +12,9 @@ import { hashToken, TokenService } from './tokens.ts';
 const invalid = () => new UnauthorizedException('Invalid credentials.');
 const invalidSession = () => new UnauthorizedException('Your session is not valid. Please sign in again.');
 
+/** The columns of an account that a new session needs. */
+export interface SessionAccount { id: string; role: string; full_name: string | null; locale: string; theme: string }
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -37,8 +40,24 @@ export class AuthService {
     return t.token;
   }
 
+  /** Counts a wrong password (or a wrong code) against the account, and locks it after too many. */
+  async registerFailure(accountId: string, detail: object = {}) {
+    const { maxFailedLogins, lockoutMinutes } = this.config.auth;
+    const u = await this.db.query(
+      `UPDATE accounts
+          SET failed_logins = CASE WHEN failed_logins + 1 >= $2 THEN 0 ELSE failed_logins + 1 END,
+              locked_until  = CASE WHEN failed_logins + 1 >= $2 THEN now() + make_interval(mins => $3::int) ELSE locked_until END
+        WHERE id = $1 RETURNING (locked_until IS NOT NULL AND locked_until > now()) AS now_locked`,
+      [accountId, maxFailedLogins, lockoutMinutes],
+    );
+    await this.audit(this.db, accountId, AUDIT.LOGIN_FAILED, { lockedNow: !!u.rows[0]?.now_locked, ...detail });
+  }
+
+  /**
+   * Checks the password. If the account has two-step sign-in on, the answer is a short-lived token (mfaRequired) and the sign-in is
+   * finished by MfaService.verifyLogin once the code is right; otherwise the session starts at once.
+   */
   async login(input: { identifier: string; password: string }, userAgent?: string) {
-    const { maxFailedLogins, lockoutMinutes, accessTtlSeconds } = this.config.auth;
     const r = await this.db.query(
       `SELECT id, role, full_name, status, password_hash, locale, theme,
               (locked_until IS NOT NULL AND locked_until > now()) AS is_locked
@@ -51,17 +70,17 @@ export class AuthService {
       throw invalid();
     }
     if (!(await verifyPassword(input.password, a.password_hash))) {
-      const u = await this.db.query(
-        `UPDATE accounts
-            SET failed_logins = CASE WHEN failed_logins + 1 >= $2 THEN 0 ELSE failed_logins + 1 END,
-                locked_until  = CASE WHEN failed_logins + 1 >= $2 THEN now() + make_interval(mins => $3::int) ELSE locked_until END
-          WHERE id = $1 RETURNING (locked_until IS NOT NULL AND locked_until > now()) AS now_locked`,
-        [a.id, maxFailedLogins, lockoutMinutes],
-      );
-      await this.audit(this.db, a.id, AUDIT.LOGIN_FAILED, { lockedNow: !!u.rows[0]?.now_locked });
+      await this.registerFailure(a.id);
       throw invalid();
     }
+    const mfa = await this.db.query(`SELECT 1 FROM account_mfa WHERE account_id = $1 AND confirmed_at IS NOT NULL`, [a.id]);
+    if (mfa.rowCount) return { mfaRequired: true as const, mfaToken: await this.tokens.signMfa(a.id), expiresIn: LIMITS.mfaTokenSeconds };
+    return this.startSession(a as SessionAccount, userAgent);
+  }
 
+  /** The sign-in is complete (password, and the code if there is one): clear the failure count and hand out the tokens. */
+  async startSession(a: SessionAccount, userAgent?: string) {
+    const { accessTtlSeconds } = this.config.auth;
     return this.db.tx(async (c) => {
       await c.query('UPDATE accounts SET failed_logins = 0, locked_until = NULL WHERE id = $1', [a.id]);
       const branches = await c.query(`SELECT branch_id::text AS id FROM account_branches WHERE account_id = $1`, [a.id]);
@@ -71,7 +90,7 @@ export class AuthService {
         accessToken: await this.tokens.signAccess(a.id),
         refreshToken,
         expiresIn: accessTtlSeconds,
-        user: { id: a.id, role: a.role, fullName: a.full_name, locale: a.locale, theme: a.theme, branchIds: branches.rows.map((b) => b.id) },
+        user: { id: a.id, role: a.role, fullName: a.full_name, locale: a.locale, theme: a.theme, branchIds: branches.rows.map((b: { id: string }) => b.id) },
       };
     });
   }

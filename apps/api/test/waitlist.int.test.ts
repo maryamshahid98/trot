@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { api, ctx, makeBranch, randomDay, startApp, stopApp } from './helpers.ts';
 import { balanceOf, codes, HOUR, liveBookings, makeClass, makePackage } from './booking-helpers.ts';
 import { auditActions, customer, directBooking, entryStatus, post, staff, statusOf, waitlistEntryFor } from './flow-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -263,7 +264,7 @@ describe('lapsed office holds', () => {
     await directBooking({ occurrenceId: occ, riderId: live.riderId, status: 'pending_office_payment', holdExpiresInMin: 5 });
     await directBooking({ occurrenceId: occ, riderId: lapsed.riderId, status: 'pending_office_payment', holdExpiresInMin: -5 });
     const r = await api('GET', `/bookings?occurrenceId=${occ}`, { token: (await staff()).token });
-    assert.deepEqual(r.body.bookings.map((b: any) => b.riderId), [live.riderId]);
+    assert.deepEqual(r.body.bookings.map((b: Json) => b.riderId), [live.riderId]);
   });
 });
 

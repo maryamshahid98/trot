@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { api, BRANCH, ctx, makeAccount, makeArena, makeBranch, randomDay, startApp, stopApp, tokenFor } from './helpers.ts';
 import { codes, DAY, HOUR, makeClass } from './booking-helpers.ts';
 import { auditActions, customer, post, staff } from './flow-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -22,7 +23,7 @@ describe('branches', () => {
     const coach = await staff('coach');
     const res = await get('/branches', coach.token);
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.branches.map((b: any) => b.id), [BRANCH]);
+    assert.deepEqual(res.body.branches.map((b: Json) => b.id), [BRANCH]);
     assert.equal((await get(`/branches/${other}`, coach.token)).status, 404);
     assert.equal((await get(`/branches/${BRANCH}`, coach.token)).status, 200);
     assert.equal((await get('/branches/not-an-id', coach.token)).status, 400);
@@ -138,7 +139,7 @@ describe('arenas', () => {
     assert.equal((await post('/arenas', manager.token, { name: name.toUpperCase(), maxCapacity: 4 })).status, 409);
     assert.equal((await post('/arenas', (await staff('reception')).token, { name: uniq('A'), maxCapacity: 4 })).status, 403);
     const list = await get('/arenas', (await staff('stable_hand')).token);
-    assert.ok(list.body.arenas.some((a: any) => a.id === res.body.id && a.maxCapacity === 8));
+    assert.ok(list.body.arenas.some((a: Json) => a.id === res.body.id && a.maxCapacity === 8));
     for (const bad of [{}, { name: '', maxCapacity: 4 }, { name: 'A', maxCapacity: 0 }, { name: 'A', maxCapacity: 1000 }, { name: 'A', maxCapacity: 2.5 }, { name: 'A'.repeat(300), maxCapacity: 4 }]) {
       assert.equal((await post('/arenas', manager.token, bad)).status, 400, JSON.stringify(bad).slice(0, 60));
     }
@@ -149,7 +150,7 @@ describe('arenas', () => {
   test('another branch cannot see or change this arena', async () => {
     const arena = await makeArena();
     const other = await staff('manager', [await makeBranch()]);
-    assert.ok(!(await get('/arenas', other.token)).body.arenas.some((a: any) => a.id === arena));
+    assert.ok(!(await get('/arenas', other.token)).body.arenas.some((a: Json) => a.id === arena));
     assert.equal((await patch(`/arenas/${arena}`, other.token, { name: 'X' })).status, 404);
     assert.equal((await get(`/arenas/${arena}/closures`, other.token)).status, 404);
     assert.equal((await post(`/arenas/${arena}/closures`, other.token, { from: iso(Date.now() + DAY), to: iso(Date.now() + 2 * DAY), reason: 'x' })).status, 404);
@@ -175,12 +176,12 @@ describe('arenas', () => {
     const created = await post(`/arenas/${arena}/closures`, manager.token, { from: iso(day), to: iso(day + 2 * DAY), reason: 'Resurfacing' });
     assert.equal(created.status, 201);
     const list = await get(`/arenas/${arena}/closures`, (await staff('reception')).token);
-    assert.deepEqual(list.body.closures.map((c: any) => [c.id, c.reason]), [[created.body.id, 'Resurfacing']]);
+    assert.deepEqual(list.body.closures.map((c: Json) => [c.id, c.reason]), [[created.body.id, 'Resurfacing']]);
     const classId = await makeClass({ startsAt: day + 5 * DAY, arenaId: arena });
     const clash = await post(`/arenas/${arena}/closures`, manager.token, { from: iso(day + 5 * DAY), to: iso(day + 6 * DAY), reason: 'Painting' });
     assert.equal(clash.status, 409);
     assert.ok(codes(clash).includes('ARENA_HAS_CLASSES'));
-    assert.deepEqual(clash.body.classes.map((c: any) => c.id), [classId]);
+    assert.deepEqual(clash.body.classes.map((c: Json) => c.id), [classId]);
     const noReason = await post(`/arenas/${arena}/closures`, manager.token, { from: iso(day + 9 * DAY), to: iso(day + 10 * DAY) });
     assert.equal(noReason.status, 400);
     assert.equal((await post(`/arenas/${arena}/closures`, manager.token, { from: iso(day + 3 * DAY), to: iso(day + 2 * DAY), reason: 'x' })).status, 400);
@@ -269,7 +270,7 @@ describe('staff leave', () => {
     const direct = await post('/staff-leave', manager.token, { staffId: coach.id, from: w.from, to: w.to });
     assert.equal(direct.status, 409);
     assert.ok(codes(direct).includes('LEAVE_HAS_CLASSES'));
-    assert.deepEqual(direct.body.classes.map((c: any) => c.id), [classId]);
+    assert.deepEqual(direct.body.classes.map((c: Json) => c.id), [classId]);
     const asked = await post('/staff-leave', coachToken, { from: w.from, to: w.to });
     assert.equal(asked.status, 201);
     const approve = await post(`/staff-leave/${asked.body.id}/decision`, manager.token, { decision: 'approve' });
@@ -313,10 +314,10 @@ describe('staff leave', () => {
     const theirs = await post('/staff-leave', peer.token, { from: w.from, to: w.to });
     const foreignCoach = await makeAccount({ role: 'coach', branchIds: [await makeBranch()] });
     const foreign = (await ctx.admin.query(`INSERT INTO staff_unavailability (staff_account_id, during, status) VALUES ($1, tstzrange($2::timestamptz,$3::timestamptz), 'requested') RETURNING id`, [foreignCoach.id, w.from, w.to])).rows[0].id;
-    const own = (await get(`/staff-leave?from=${encodeURIComponent(w.from)}&to=${encodeURIComponent(w.to)}`, coach.token)).body.leave.map((l: any) => l.id);
+    const own = (await get(`/staff-leave?from=${encodeURIComponent(w.from)}&to=${encodeURIComponent(w.to)}`, coach.token)).body.leave.map((l: Json) => l.id);
     assert.ok(own.includes(mine.body.id) && !own.includes(theirs.body.id));
     assert.equal((await get(`/staff-leave?staffId=${peer.id}`, coach.token)).status, 403);
-    const all = (await get(`/staff-leave?status=requested&from=${encodeURIComponent(w.from)}&to=${encodeURIComponent(w.to)}`, manager.token)).body.leave.map((l: any) => l.id);
+    const all = (await get(`/staff-leave?status=requested&from=${encodeURIComponent(w.from)}&to=${encodeURIComponent(w.to)}`, manager.token)).body.leave.map((l: Json) => l.id);
     assert.ok(all.includes(mine.body.id) && all.includes(theirs.body.id) && !all.includes(foreign));
     assert.equal((await get('/staff-leave?status=zzz', manager.token)).status, 400);
     assert.equal((await get('/staff-leave', (await customer()).token)).status, 403);

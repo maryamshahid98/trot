@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { jwtVerify, SignJWT } from 'jose';
-import { UUID_RE } from '../config/constants.ts';
+import { LIMITS, UUID_RE } from '../config/constants.ts';
 import { APP_CONFIG } from '../config/env.ts';
 import type { AppConfig } from '../config/env.ts';
 
@@ -34,6 +34,31 @@ export class TokenService {
     const { issuer, audience } = this.config.auth;
     const { payload } = await jwtVerify(token, this.key, { issuer, audience, algorithms: ['HS256'] });
     if (typeof payload.sub !== 'string' || !UUID_RE.test(payload.sub)) throw new Error('bad subject');
+    return payload.sub;
+  }
+
+  /**
+   * Proof that the PASSWORD was right, good for a few minutes, only for finishing a two-step sign-in. It carries a different audience from
+   * an access token, so it cannot be used to call the API, and an access token cannot be used to skip the code.
+   */
+  signMfa(accountId: string): Promise<string> {
+    const { issuer, audience } = this.config.auth;
+    return new SignJWT({ typ: 'mfa' })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setSubject(accountId)
+      .setIssuer(issuer)
+      .setAudience(`${audience}:mfa`)
+      .setJti(randomUUID())
+      .setIssuedAt()
+      .setExpirationTime(`${LIMITS.mfaTokenSeconds}s`)
+      .sign(this.key);
+  }
+
+  /** The account id inside a sign-in token, or throws. */
+  async verifyMfa(token: string): Promise<string> {
+    const { issuer, audience } = this.config.auth;
+    const { payload } = await jwtVerify(token, this.key, { issuer, audience: `${audience}:mfa`, algorithms: ['HS256'] });
+    if (payload.typ !== 'mfa' || typeof payload.sub !== 'string' || !UUID_RE.test(payload.sub)) throw new Error('bad subject');
     return payload.sub;
   }
 

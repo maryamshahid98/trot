@@ -5,7 +5,7 @@ export interface Problem { field: string; message: string }
 export class ApiError extends Error {
   constructor(public status: number, message: string, public problems: Problem[] = []) { super(message); }
 }
-export interface SessionUser { id: string; role: Role; fullName: string | null; locale?: string; theme?: string; branchIds: string[] }
+export interface SessionUser { id: string; role: Role; fullName: string | null; locale?: string; theme?: string; branchIds: string[]; mfaEnabled?: boolean; mfaEnrollmentRequired?: boolean }
 interface LoginResult { accessToken: string; expiresIn: number; user: SessionUser }
 
 // The access token lives only in memory. The refresh token is an HttpOnly cookie the browser sends by itself,
@@ -50,11 +50,43 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
+async function rawBinary(method: string, path: string, body?: Blob, headers: Record<string, string> = {}): Promise<Response> {
+  const h: Record<string, string> = { [CLIENT_HEADER.name]: CLIENT_HEADER.value, ...headers };
+  if (accessToken) h.Authorization = `Bearer ${accessToken}`;
+  return fetch(`${API_URL}${path}`, { method, headers: h, credentials: 'include', body });
+}
+async function binary(method: string, path: string, body?: Blob, headers?: Record<string, string>): Promise<Response> {
+  let res = await rawBinary(method, path, body, headers);
+  if (res.status === HTTP.UNAUTHORIZED && accessToken && (await refreshSession())) res = await rawBinary(method, path, body, headers);
+  if (res.status === HTTP.UNAUTHORIZED && accessToken) { setAccessToken(null); onSignedOut(); }
+  if (!res.ok) throw await toError(res);
+  return res;
+}
+/** Sends a file as the request body. The server checks what it really is, whatever the name or type says. */
+export const uploadFile = (path: string, file: File) => binary('PUT', path, file, { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) });
+/** Fetches a file the person is allowed to see. A plain link cannot do this, because the sign-in token is not a cookie. */
+export async function fetchFile(path: string): Promise<{ blob: Blob; type: string }> {
+  const res = await binary('GET', path);
+  const blob = await res.blob();
+  return { blob, type: blob.type };
+}
 export const get = <T,>(path: string) => api<T>('GET', path);
 export const post = <T,>(path: string, body?: unknown) => api<T>('POST', path, body ?? {});
 
-export async function login(identifier: string, password: string): Promise<SessionUser> {
+/** The password was right: either the person is in, or a code from their authenticator app is still needed (mfaToken carries the first step). */
+export type LoginOutcome = { user: SessionUser } | { mfaToken: string };
+export async function login(identifier: string, password: string): Promise<LoginOutcome> {
   const res = await raw('POST', '/auth/login', { identifier, password }, null);
+  if (!res.ok) throw await toError(res);
+  const d = (await res.json()) as LoginResult & { mfaRequired?: boolean; mfaToken?: string };
+  if (d.mfaRequired && d.mfaToken) return { mfaToken: d.mfaToken };
+  accessToken = d.accessToken;
+  return { user: d.user };
+}
+
+/** The second step: a code from the app, or a recovery code. */
+export async function loginWithCode(mfaToken: string, entry: { code?: string; recoveryCode?: string }): Promise<SessionUser> {
+  const res = await raw('POST', '/auth/mfa/verify', { mfaToken, ...entry }, null);
   if (!res.ok) throw await toError(res);
   const d = (await res.json()) as LoginResult;
   accessToken = d.accessToken;

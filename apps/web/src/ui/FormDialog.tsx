@@ -4,7 +4,8 @@ import { ApiError } from '../api/client';
 import { Btn, Modal } from './kit';
 import { errorText } from '../lib/useApi';
 
-export type FieldDef =
+export type FieldDef = FieldShape & { /** Show this field only when this returns true for the answers so far. */ showIf?: (v: Values) => boolean };
+type FieldShape =
   | { name: string; label: string; type: 'text' | 'password' | 'email' | 'tel' | 'date' | 'datetime'; required?: boolean; hint?: string }
   | { name: string; label: string; type: 'number' | 'money'; required?: boolean; hint?: string; min?: number; max?: number }
   | { name: string; label: string; type: 'textarea'; required?: boolean; hint?: string }
@@ -41,7 +42,7 @@ export function FormDialog({ title, fields, initial = {}, submit = 'Save', onSub
   return (
     <Modal title={title} onClose={onClose} wide={wide}>
       <form onSubmit={go} className="form" noValidate>
-        {fields.map((f) => {
+        {fields.filter((f) => !f.showIf || f.showIf(v)).map((f) => {
           const id = `f-${f.name}`;
           const err = problems[f.name];
           const req = 'required' in f && f.required;

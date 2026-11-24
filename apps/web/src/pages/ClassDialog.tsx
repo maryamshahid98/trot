@@ -7,7 +7,7 @@ import { fmtDateTime, fmtTime, fromMinor, label, money, toMinor } from '../lib/f
 import { useQuery, qs } from '../lib/useApi';
 import type { Occurrence, Rider, RosterBooking, WaitEntry } from '../lib/types';
 import { FormDialog } from '../ui/FormDialog';
-import { Badge, Btn, Card, Confirm, Load, Modal, Table, Tabs, useAct } from '../ui/kit';
+import { Badge, Btn, Card, Confirm, Load, Modal, Table, Tabs, useAct, useToast } from '../ui/kit';
 import { opts } from '../ui/pickers';
 
 interface Roster { occurrence: { id: string; title: string; capacity: number }; bookings: RosterBooking[]; waitlist: WaitEntry[] }
@@ -17,12 +17,13 @@ interface Pkg { id: string; status: string; name: string; balance?: number; vali
 
 type Dialog =
   | { kind: 'addBooking' } | { kind: 'pay'; b: RosterBooking } | { kind: 'unpaid'; b: RosterBooking }
-  | { kind: 'cancelBooking'; b: RosterBooking } | { kind: 'complete' } | { kind: 'cancelClass' } | { kind: 'assign' } | { kind: 'unassign'; a: Assignment } | null;
+  | { kind: 'cancelBooking'; b: RosterBooking } | { kind: 'complete' } | { kind: 'cancelClass' } | { kind: 'cancelSeries' } | { kind: 'assign' } | { kind: 'unassign'; a: Assignment } | null;
 
 export function ClassDialog({ occ, onClose, onChanged }: { occ: Occurrence; onClose: () => void; onChanged: () => void }) {
   const { user } = useAuth();
   const role = user!.role as Role;
   const act = useAct();
+  const toast = useToast();
   const [tab, setTab] = useState<'riders' | 'horses'>('riders');
   const [dlg, setDlg] = useState<Dialog>(null);
   const roster = useQuery<Roster>(`/bookings${qs({ occurrenceId: occ.id })}`);
@@ -54,6 +55,7 @@ export function ClassDialog({ occ, onClose, onChanged }: { occ: Occurrence; onCl
         {front && open && <Btn onClick={() => void act(() => post(`/schedule/${occ.id}/waitlist/refresh`), 'Offers sent').then((ok) => ok && refresh())}>Offer free places</Btn>}
         {runner && open && <Btn onClick={() => setDlg({ kind: 'complete' })}>Finish class</Btn>}
         {manager && open && <Btn kind="danger" onClick={() => setDlg({ kind: 'cancelClass' })}>Cancel class</Btn>}
+        {manager && open && occ.seriesId && <Btn kind="danger" onClick={() => setDlg({ kind: 'cancelSeries' })}>Cancel series</Btn>}
       </div>
 
       {tab === 'riders' && (
@@ -110,6 +112,11 @@ export function ClassDialog({ occ, onClose, onChanged }: { occ: Occurrence; onCl
         <FormDialog title="Cancel this class" submit="Cancel class" onClose={() => setDlg(null)} onDone={() => { done(); onClose(); }}
           fields={[{ name: 'cause', label: 'Why', type: 'select', required: true, options: opts(CANCEL_CAUSES_CLASS) }, { name: 'reason', label: 'Reason', type: 'text', required: true, hint: 'All bookings are cancelled and the horses are freed.' }]}
           initial={{ cause: 'club' }} onSubmit={(v) => post(`/schedule/${occ.id}/cancel`, { cause: v.cause, reason: v.reason })} />
+      )}
+      {dlg?.kind === 'cancelSeries' && (
+        <FormDialog title="Cancel the whole series" submit="Cancel series" onClose={() => setDlg(null)} onDone={() => { done(); onClose(); }}
+          fields={[{ name: 'cause', label: 'Why', type: 'select', required: true, options: opts(CANCEL_CAUSES_CLASS) }, { name: 'reason', label: 'Reason', type: 'text', required: true, hint: 'Every date that has not started yet is cancelled, like a single class: bookings are cancelled and the horses are freed.' }]}
+          initial={{ cause: 'club' }} onSubmit={async (v) => { const r = await post<{ cancelled: number; failed: unknown[] }>(`/schedule/series/${occ.seriesId}/cancel`, { cause: v.cause, reason: v.reason }); toast(r.failed.length ? `${r.cancelled} cancelled, ${r.failed.length} could not be` : `${r.cancelled} classes cancelled`); }} />
       )}
       {dlg?.kind === 'assign' && <AssignHorse occ={occ} riders={roster.data?.bookings ?? []} onClose={() => setDlg(null)} onDone={done} />}
       {dlg?.kind === 'unassign' && <Confirm title="Remove this horse?" text={dlg.a.horseName} danger onClose={() => setDlg(null)} onDone={done} action={() => api('DELETE', `/schedule/${occ.id}/horses/${dlg.a.id}`)} />}

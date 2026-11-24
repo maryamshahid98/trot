@@ -86,6 +86,7 @@ export class RidersService {
           )
         ).rows[0].id;
         if (guardianId) await c.query(`INSERT INTO guardian_riders (guardian_account_id, rider_id) VALUES ($1,$2)`, [guardianId, id]);
+        await c.query(`INSERT INTO rider_level_history (branch_id, rider_id, from_level, to_level, reason, changed_by, note) VALUES ($1,$2,NULL,'beginner','initial',$3,'New rider')`, [branchId, id, user.id]);
         await writeAudit(c, user, branchId, AUDIT.RIDER_CREATE, ENTITY.RIDER, id, { status, relation: b.relation ?? null });
         return { id, status };
       });
@@ -149,12 +150,13 @@ export class RidersService {
 
   async setLevel(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    const { level } = parse(SetLevel, body);
+    const { level, reason } = parse(SetLevel, body);
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const r = await this.load(c, id, user, 'r.id, r.branch_id AS "branchId", r.level', true);
       if (r.level !== level) {
         await c.query(`UPDATE riders SET level = $2 WHERE id = $1`, [id, level]);
-        await writeAudit(c, user, r.branchId, AUDIT.RIDER_LEVEL, ENTITY.RIDER, id, { from: r.level, to: level });
+        await c.query(`INSERT INTO rider_level_history (branch_id, rider_id, from_level, to_level, reason, changed_by, note) VALUES ($1,$2,$3,$4,'correction',$5,$6)`, [r.branchId, id, r.level, level, user.id, reason]);
+        await writeAudit(c, user, r.branchId, AUDIT.RIDER_LEVEL, ENTITY.RIDER, id, { from: r.level, to: level, reason });
       }
       return { id, level };
     });

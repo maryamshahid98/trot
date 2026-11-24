@@ -11,7 +11,7 @@ before(startApp);
 after(stopApp);
 
 const enumValues = async (type: string): Promise<string[]> =>
-  (await ctx.admin.query(`SELECT unnest(enum_range(NULL::${type}))::text AS v`)).rows.map((r: any) => r.v);
+  (await ctx.admin.query(`SELECT unnest(enum_range(NULL::${type}))::text AS v`)).rows.map((r) => r.v);
 
 test('roles match the account_role enum', async () => {
   assert.deepEqual([...ROLES].sort(), (await enumValues('account_role')).sort());
@@ -46,7 +46,7 @@ test('the other fixed values the booking code uses exist in the database', async
   const kinds = await enumValues('document_kind');
   for (const k of Object.values(DOC_KIND)) assert.ok(kinds.includes(k), `${k} is not a document_kind`);
   // These two are CHECK constraints, not enums, so read the constraint text.
-  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'bookings'::regclass AND contype = 'c'`)).rows.map((r: any) => r.d).join(' ');
+  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'bookings'::regclass AND contype = 'c'`)).rows.map((r) => r.d).join(' ');
   for (const c of CANCEL_CAUSES) assert.ok(defs.includes(`'${c}'`), `cancel cause ${c} is not allowed by the bookings table`);
   for (const s of Object.values(BOOKING_SOURCE)) assert.ok(defs.includes(`'${s}'`), `source ${s} is not allowed by the bookings table`);
 });
@@ -57,12 +57,12 @@ test('rider statuses and document kinds match their enums', async () => {
 });
 
 test('document statuses match the rider_documents check constraint', async () => {
-  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'rider_documents'::regclass AND contype = 'c'`)).rows.map((r: any) => r.d).join(' ');
+  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'rider_documents'::regclass AND contype = 'c'`)).rows.map((r) => r.d).join(' ');
   for (const s of Object.values(DOC_STATUS)) assert.ok(defs.includes(`'${s}'`), `document status ${s} is not allowed by the table`);
 });
 
 test('waitlist statuses match the waitlist_entries check constraint', async () => {
-  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'waitlist_entries'::regclass AND contype = 'c'`)).rows.map((r: any) => r.d).join(' ');
+  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'waitlist_entries'::regclass AND contype = 'c'`)).rows.map((r) => r.d).join(' ');
   for (const s of Object.values(WAITLIST_STATUS)) assert.ok(defs.includes(`'${s}'`), `waitlist status ${s} is not allowed by the table`);
 });
 
@@ -72,7 +72,7 @@ test('the occurrence statuses the code names are exactly the database ones', asy
 
 test('payment methods, adjustment kinds and package statuses match their check constraints', async () => {
   const defs = async (table: string) =>
-    (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = $1::regclass AND contype = 'c'`, [table])).rows.map((r: any) => r.d).join(' ');
+    (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = $1::regclass AND contype = 'c'`, [table])).rows.map((r) => r.d).join(' ');
   const receipts = await defs('receipts');
   for (const m of PAYMENT_METHODS) assert.ok(receipts.includes(`'${m}'`), `payment method ${m} is not allowed by receipts`);
   const adjustments = await defs('financial_adjustments');
@@ -90,7 +90,7 @@ test('horse statuses match the horse_status enum', async () => {
 });
 
 test('account and leave statuses are allowed by their check constraints', async () => {
-  const defs = async (table: string) => (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = $1::regclass AND contype = 'c'`, [table])).rows.map((r: any) => r.d).join(' ');
+  const defs = async (table: string) => (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = $1::regclass AND contype = 'c'`, [table])).rows.map((r) => r.d).join(' ');
   const accounts = await defs('accounts');
   for (const s of Object.values(ACCOUNT_STATUS)) assert.ok(accounts.includes(`'${s}'`), `account status ${s} is not allowed by accounts`);
   const leave = await defs('staff_unavailability');
@@ -108,17 +108,17 @@ test('every club rule in the domain package can be set per branch, and nothing e
 });
 
 test('incident severities and statuses match the incidents check constraints', async () => {
-  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'incidents'::regclass AND contype = 'c'`)).rows.map((r: any) => r.d).join(' ');
+  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'incidents'::regclass AND contype = 'c'`)).rows.map((r) => r.d).join(' ');
   for (const s of INCIDENT_SEVERITIES) assert.ok(defs.includes(`'${s}'`), `severity ${s} is not allowed by incidents`);
   for (const s of INCIDENT_STATUSES) assert.ok(defs.includes(`'${s}'`), `status ${s} is not allowed by incidents`);
 });
 
 test('every incident status has a next step list, and each step is a real status', () => {
   assert.deepEqual(Object.keys(INCIDENT_TRANSITIONS).sort(), [...INCIDENT_STATUSES].sort());
-  for (const [from, to] of Object.entries(INCIDENT_TRANSITIONS)) for (const t of to) assert.ok(INCIDENT_STATUSES.includes(t as any), `${from} -> ${t}`);
+  for (const [from, to] of Object.entries(INCIDENT_TRANSITIONS)) for (const t of to) assert.ok((INCIDENT_STATUSES as readonly string[]).includes(t), `${from} -> ${t}`);
 });
 
 test('ledger reasons match the package_ledger check constraint', async () => {
-  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'package_ledger'::regclass AND contype = 'c'`)).rows.map((r: any) => r.d).join(' ');
+  const defs = (await ctx.admin.query(`SELECT pg_get_constraintdef(oid) AS d FROM pg_constraint WHERE conrelid = 'package_ledger'::regclass AND contype = 'c'`)).rows.map((r) => r.d).join(' ');
   for (const r of Object.values(LEDGER_REASON)) assert.ok(defs.includes(`'${r}'`), `ledger reason ${r} is not allowed by package_ledger`);
 });

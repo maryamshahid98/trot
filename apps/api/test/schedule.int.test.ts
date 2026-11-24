@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DbService } from '../src/db/db.service.ts';
 import { api, at, BRANCH, ctx, makeAccount, makeArena, makeBranch, randomDay, startApp, stopApp, tokenFor } from './helpers.ts';
+import type { Json } from './helpers.ts';
 
 let day = 0;
 let arenaId = '';
@@ -73,10 +74,10 @@ test('customers see published classes only; staff see drafts too', async () => {
   const pub = await post(tokens.manager, fresh({ title: 'Public class', status: 'published' }));
   assert.equal(draft.status, 201);
   assert.equal(pub.status, 201);
-  const asCustomer = (await list(tokens.customer)).body as any[];
+  const asCustomer = (await list(tokens.customer)).body as Json[];
   assert.ok(asCustomer.some((c) => c.title === 'Public class'));
   assert.ok(!asCustomer.some((c) => c.title === 'Secret draft'));
-  const asManager = (await list(tokens.manager)).body as any[];
+  const asManager = (await list(tokens.manager)).body as Json[];
   assert.ok(asManager.some((c) => c.title === 'Secret draft'));
 });
 
@@ -122,7 +123,7 @@ test('unknown arena and unknown coach are 400', async () => {
 test('missing, wrongly typed and malformed fields are 400 with field names', async () => {
   const missing = await post(tokens.manager, { branchId: BRANCH });
   assert.equal(missing.status, 400);
-  assert.ok(missing.body.problems.some((p: any) => p.field === 'title'));
+  assert.ok(missing.body.problems.some((p: Json) => p.field === 'title'));
   for (const bad of [
     fresh({ title: '' }), fresh({ title: '   ' }), fresh({ title: 'x'.repeat(121) }), fresh({ title: 42 }),
     fresh({ arenaId: 'not-an-id' }), fresh({ coachId: `1' OR '1'='1` }),
@@ -139,11 +140,11 @@ test('impossible values reach the rules and are refused with a reason: capacity 
   const s = fresh();
   const cap0 = await post(tokens.manager, { ...s, capacity: 0 });
   assert.equal(cap0.status, 422);
-  assert.ok(cap0.body.problems.some((p: any) => p.code === 'BAD_CAPACITY'));
+  assert.ok(cap0.body.problems.some((p: Json) => p.code === 'BAD_CAPACITY'));
   assert.equal((await post(tokens.manager, { ...s, capacity: -3 })).status, 422);
   const back = await post(tokens.manager, { ...s, startsAt: s.endsAt, endsAt: s.startsAt });
   assert.equal(back.status, 422);
-  assert.ok(back.body.problems.some((p: any) => p.code === 'BAD_TIME'));
+  assert.ok(back.body.problems.some((p: Json) => p.code === 'BAD_TIME'));
   assert.equal((await post(tokens.manager, { ...s, endsAt: s.startsAt })).status, 422);
 });
 
@@ -158,7 +159,7 @@ test('text is stored exactly as typed: quotes and SQL-looking text are just text
   const title = `Robert'); DROP TABLE occurrences;--`;
   const r = await post(tokens.manager, fresh({ title }));
   assert.equal(r.status, 201);
-  const rows = (await list(tokens.manager)).body as any[];
+  const rows = (await list(tokens.manager)).body as Json[];
   assert.ok(rows.some((c) => c.title === title));
   assert.equal((await ctx.admin.query(`SELECT to_regclass('public.occurrences') AS t`)).rows[0].t, 'occurrences');
 });
@@ -172,7 +173,7 @@ test('listing: bad dates, backwards range, a range over 62 days, and a bad branc
 });
 
 test('listing shows arena and coach names, in time order', async () => {
-  const rows = (await list(tokens.manager)).body as any[];
+  const rows = (await list(tokens.manager)).body as Json[];
   assert.ok(rows.length > 0);
   assert.ok(rows.every((r) => r.arenaName && r.coachName));
   const starts = rows.map((r) => Date.parse(r.startsAt));
@@ -185,7 +186,7 @@ test('the same arena at an overlapping time is refused with a plain reason; touc
   assert.equal((await post(tokens.manager, s)).status, 201);
   const clash = await post(tokens.manager, { ...s, coachId: coach2.id });
   assert.equal(clash.status, 422);
-  assert.ok(clash.body.problems.some((p: any) => p.code === 'ARENA_OVERLAP'));
+  assert.ok(clash.body.problems.some((p: Json) => p.code === 'ARENA_OVERLAP'));
   // a class that starts exactly when the first one ends does not clash (it uses another arena, so only the time edge is tested)
   const touching = await post(tokens.manager, { ...s, arenaId: await makeArena(), coachId: coach2.id, startsAt: s.endsAt, endsAt: new Date(Date.parse(s.endsAt) + 300_000).toISOString() });
   assert.equal(touching.status, 201, touching.text);
@@ -196,7 +197,7 @@ test('the same coach at an overlapping time is refused', async () => {
   assert.equal((await post(tokens.manager, s)).status, 201);
   const clash = await post(tokens.manager, { ...s, arenaId: await makeArena() });
   assert.equal(clash.status, 422);
-  assert.ok(clash.body.problems.some((p: any) => p.code === 'COACH_OVERLAP'));
+  assert.ok(clash.body.problems.some((p: Json) => p.code === 'COACH_OVERLAP'));
 });
 
 test('a cancelled class no longer blocks its slot', async () => {
@@ -251,7 +252,7 @@ test('a coach on approved leave cannot be scheduled; leave that is only requeste
   await ctx.admin.query(`INSERT INTO staff_unavailability (staff_account_id, during, reason, status) VALUES ($1, tstzrange($2::timestamptz,$3::timestamptz), 'leave', 'approved')`, [away.id, at(day, 14), at(day, 18)]);
   const blocked = await post(tokens.manager, cls({ coachId: away.id, startsAt: at(day, 15), endsAt: at(day, 16) }));
   assert.equal(blocked.status, 422);
-  assert.ok(blocked.body.problems.some((p: any) => p.code === 'COACH_UNAVAILABLE'));
+  assert.ok(blocked.body.problems.some((p: Json) => p.code === 'COACH_UNAVAILABLE'));
 
   const pending = await makeAccount({ role: 'coach' });
   await ctx.admin.query(`INSERT INTO staff_unavailability (staff_account_id, during, reason, status) VALUES ($1, tstzrange($2::timestamptz,$3::timestamptz), 'leave', 'requested')`, [pending.id, at(day, 14), at(day, 18)]);
@@ -263,7 +264,7 @@ test('an arena closure blocks scheduling', async () => {
   await ctx.admin.query(`INSERT INTO arena_closures (arena_id, during, reason) VALUES ($1, tstzrange($2::timestamptz,$3::timestamptz), 'repairs')`, [closedArena, at(day, 20), at(day, 22)]);
   const r = await post(tokens.manager, cls({ arenaId: closedArena, startsAt: at(day, 20.5), endsAt: at(day, 21.5) }));
   assert.equal(r.status, 422);
-  assert.ok(r.body.problems.some((p: any) => p.code === 'ARENA_CLOSED'));
+  assert.ok(r.body.problems.some((p: Json) => p.code === 'ARENA_CLOSED'));
 });
 
 test('several problems at once are all reported', async () => {
@@ -273,7 +274,7 @@ test('several problems at once are all reported', async () => {
   assert.equal(first.status, 201);
   const r = await post(tokens.manager, cls({ arenaId: a2, startsAt: at(day, 22.3), endsAt: at(day, 22.6) }));
   assert.equal(r.status, 422);
-  const codes = r.body.problems.map((p: any) => p.code);
+  const codes = r.body.problems.map((p: Json) => p.code);
   assert.ok(codes.includes('COACH_OVERLAP') && codes.includes('ARENA_CLOSED'), codes.join(','));
 });
 
@@ -299,10 +300,10 @@ test('with no branch set, the API database role sees no classes at all', async (
 
 test('a scope for another branch sees none of this branch\'s classes, and cannot write into this branch', async () => {
   const db = ctx.app.get(DbService);
-  const n = await db.scoped({ branchIds: [otherBranch], role: 'manager' }, async (c: any) => (await c.query('SELECT count(*)::int AS n FROM occurrences WHERE branch_id = $1', [BRANCH])).rows[0].n);
+  const n = await db.scoped({ branchIds: [otherBranch], role: 'manager' }, async (c: Json) => (await c.query('SELECT count(*)::int AS n FROM occurrences WHERE branch_id = $1', [BRANCH])).rows[0].n);
   assert.equal(n, 0);
   await assert.rejects(
-    db.scoped({ branchIds: [otherBranch], role: 'manager' }, (c: any) =>
+    db.scoped({ branchIds: [otherBranch], role: 'manager' }, (c: Json) =>
       c.query(`INSERT INTO occurrences (branch_id, title, format, arena_id, coach_id, during, capacity) VALUES ($1,'x','group',$2,$3,tstzrange(now(), now() + interval '1 hour'),4)`, [BRANCH, arenaId, coach.id])),
     /row-level security/,
   );

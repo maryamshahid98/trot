@@ -2,6 +2,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { api, BRANCH, ctx, makeAccount, makeBranch, startApp, stopApp, tokenFor, randomDay } from './helpers.ts';
 import { codes, guard, HOUR, LONG_LIVED_UNTIL, makeClass, makeRider, verifyDocs } from './booking-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -128,7 +129,7 @@ describe('POST /riders', () => {
     const c = await person('customer');
     const r = await post('/riders', c.token, { fullName: name(), dateOfBirth: ADULT, relation: 'self', medicalNotes: 'SECRET-NOTE' });
     const rows = (await ctx.admin.query(`SELECT action, detail::text AS d FROM audit_log WHERE entity_id = $1`, [r.body.id])).rows;
-    assert.deepEqual(rows.map((x: any) => x.action), ['rider.create']);
+    assert.deepEqual(rows.map((x) => x.action), ['rider.create']);
     assert.ok(!rows[0].d.includes('SECRET-NOTE'));
   });
 });
@@ -142,7 +143,7 @@ describe('reading riders', () => {
     await post('/riders', stranger.token, { fullName: 'Not mine', dateOfBirth: ADULT, relation: 'self' });
     const r = await api('GET', '/riders/mine', { token: c.token });
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.riders.map((x: any) => x.fullName).sort(), ['Kid', 'Me']);
+    assert.deepEqual(r.body.riders.map((x: Json) => x.fullName).sort(), ['Kid', 'Me']);
     assert.equal((await api('GET', '/riders/mine')).status, 401);
     assert.equal((await api('GET', '/riders/mine', { token: (await person('reception')).token })).status, 403);
   });
@@ -248,16 +249,24 @@ describe('level and status', () => {
     return r.body.id as string;
   }
 
-  test('level: coach, manager and owner only, and the value must be a real level', async () => {
+  test('level correction: managers and owners only (a coach assesses instead), with a reason, a real level, and a kept history', async () => {
     const id = await pendingRider();
-    assert.equal((await post(`/riders/${id}/level`, (await person('customer')).token, { level: 'advanced' })).status, 403);
-    assert.equal((await post(`/riders/${id}/level`, (await person('reception')).token, { level: 'advanced' })).status, 403);
-    assert.equal((await post(`/riders/${id}/level`, undefined, { level: 'advanced' })).status, 401);
-    const coach = await person('coach');
-    assert.equal((await post(`/riders/${id}/level`, coach.token, { level: 'expert' })).status, 400);
-    assert.equal((await post(`/riders/${id}/level`, coach.token, { level: 'intermediate' })).status, 201);
+    const fix = { level: 'advanced', reason: 'Entered wrongly at sign-up' };
+    assert.equal((await post(`/riders/${id}/level`, (await person('customer')).token, fix)).status, 403);
+    assert.equal((await post(`/riders/${id}/level`, (await person('reception')).token, fix)).status, 403);
+    assert.equal((await post(`/riders/${id}/level`, (await person('coach')).token, fix)).status, 403, 'a coach recommends through an assessment; a manager approves');
+    assert.equal((await post(`/riders/${id}/level`, undefined, fix)).status, 401);
+    const manager = await person('manager');
+    assert.equal((await post(`/riders/${id}/level`, manager.token, { level: 'expert', reason: 'x' })).status, 400, 'not a level');
+    assert.equal((await post(`/riders/${id}/level`, manager.token, { level: 'intermediate' })).status, 400, 'a reason is required');
+    assert.equal((await post(`/riders/${id}/level`, manager.token, { level: 'intermediate', reason: '   ' })).status, 400, 'a blank reason is not a reason');
+    assert.equal((await post(`/riders/${id}/level`, manager.token, { level: 'intermediate', reason: 'Placed by the head coach' })).status, 201);
     assert.equal((await ctx.admin.query(`SELECT level FROM riders WHERE id = $1`, [id])).rows[0].level, 'intermediate');
-    assert.equal((await post(`/riders/${id}/level`, (await person('coach', [await makeBranch()])).token, { level: 'advanced' })).status, 404);
+    const history = (await ctx.admin.query(`SELECT from_level, to_level, reason, note, changed_by FROM rider_level_history WHERE rider_id = $1 ORDER BY id`, [id])).rows;
+    assert.deepEqual(history.map((h) => [h.from_level, h.to_level, h.reason]), [[null, 'beginner', 'initial'], ['beginner', 'intermediate', 'correction']]);
+    assert.equal(history[1].note, 'Placed by the head coach');
+    assert.equal(history[1].changed_by, manager.id);
+    assert.equal((await post(`/riders/${id}/level`, (await person('manager', [await makeBranch()])).token, fix)).status, 404);
   });
 
   test('reception can approve or reject a sign-up but not suspend', async () => {
@@ -432,8 +441,8 @@ describe('documents', () => {
     const both = await Promise.all([post(`/documents/${fresh}/verify`, rec.token), post(`/documents/${fresh}/verify`, mgr.token)]);
     assert.deepEqual(both.map((r) => r.status).sort(), [201, 409]);
     const rows = (await ctx.admin.query(`SELECT id, status FROM rider_documents WHERE rider_id = $1 AND kind = 'medical_form'`, [f.riderId])).rows;
-    assert.equal(rows.find((r: any) => r.id === old).status, 'superseded');
-    assert.equal(rows.filter((r: any) => r.status === 'verified').length, 1);
+    assert.equal(rows.find((r) => r.id === old).status, 'superseded');
+    assert.equal(rows.filter((r) => r.status === 'verified').length, 1);
   });
 
   test('from sign-up to first booking: submit, verify, approve, then book', async () => {

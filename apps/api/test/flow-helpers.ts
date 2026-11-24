@@ -37,4 +37,4 @@ export const entryStatus = async (id: string): Promise<string> => (await ctx.adm
 export const waitlistEntryFor = async (occurrenceId: string, riderId: string): Promise<string> =>
   (await ctx.admin.query(`SELECT id FROM waitlist_entries WHERE occurrence_id = $1 AND rider_id = $2 ORDER BY joined_at DESC LIMIT 1`, [occurrenceId, riderId])).rows[0].id;
 export const auditActions = async (entityId: string): Promise<string[]> =>
-  (await ctx.admin.query(`SELECT action FROM audit_log WHERE entity_id = $1 ORDER BY id`, [entityId])).rows.map((r: any) => r.action);
+  (await ctx.admin.query(`SELECT action FROM audit_log WHERE entity_id = $1 ORDER BY id`, [entityId])).rows.map((r) => r.action);

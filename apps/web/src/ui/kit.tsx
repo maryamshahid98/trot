@@ -54,6 +54,7 @@ export const Btn = ({ children, onClick, kind = 'plain', small, disabled, type =
   <button type={type} className={`btn2 ${kind}${small ? ' small' : ''}`} onClick={onClick} disabled={disabled}>{children}</button>
 );
 const TONES: Record<string, string> = {
+  sent: 'good', queued: 'warn', sending: 'warn', failed: 'bad', paid: 'good', issued: 'warn', voided: 'bad', passed: 'good', below: 'bad',
   confirmed: 'good', active: 'good', available: 'good', verified: 'good', approved: 'good', completed: 'good', published: 'good', closed: 'good', checked_in: 'good',
   pending_office_payment: 'warn', pending: 'warn', requested: 'warn', draft: 'warn', pending_review: 'warn', resting: 'warn', frozen: 'warn', submitted: 'warn', open: 'warn', medium: 'warn',
   cancelled: 'bad', no_show: 'bad', rejected: 'bad', suspended: 'bad', injured: 'bad', medical_hold: 'bad', expired: 'bad', locked: 'bad', critical: 'bad', high: 'bad', reopened: 'bad',
@@ -64,25 +65,37 @@ export const Badge = ({ value }: { value: string }) => <span className={`badge $
 export interface Col<R> { head: string; cell: (r: R) => ReactNode; width?: string; right?: boolean }
 export function Table<R>({ cols, rows, empty = 'Nothing to show.', onRow, rowKey }: { cols: Col<R>[]; rows: R[]; empty?: string; onRow?: (r: R) => void; rowKey: (r: R) => string }) {
   if (rows.length === 0) return <Empty>{empty}</Empty>;
-  const grid = cols.map((c) => c.width ?? '1fr').join(' ');
+  // One grid for the whole table, so every row shares the same columns. A column never gets narrower than its widest
+  // unbreakable content (a badge, a button), so cells cannot spill into their neighbours.
+  const grid = cols.map((c) => `minmax(min-content, ${c.width ?? '1fr'})`).join(' ');
+  const cell = (c: Col<R>) => (c.right ? 'end' : undefined);
   return (
-    <div className="table" role="table">
-      <div className="tr th" role="row" style={{ gridTemplateColumns: grid }}>
-        {cols.map((c) => <span key={c.head} role="columnheader" style={c.right ? { textAlign: 'end' } : undefined}>{c.head}</span>)}
-      </div>
-      {rows.map((r) => (
-        <div key={rowKey(r)} className={`tr${onRow ? ' click' : ''}`} role="row" style={{ gridTemplateColumns: grid }} onClick={onRow ? () => onRow(r) : undefined}>
-          {cols.map((c) => <span key={c.head} role="cell" style={c.right ? { textAlign: 'end' } : undefined}>{c.cell(r)}</span>)}
+    <div className="table-wrap">
+      <div className="table" role="table" style={{ gridTemplateColumns: grid }}>
+        <div className="tr th" role="row">
+          {cols.map((c) => <span key={c.head} role="columnheader" className={cell(c)}>{c.head}</span>)}
         </div>
-      ))}
+        {rows.map((r) => (
+          <div key={rowKey(r)} className={`tr${onRow ? ' click' : ''}`} role="row" onClick={onRow ? () => onRow(r) : undefined}>
+            {cols.map((c) => <span key={c.head} role="cell" className={cell(c)} data-label={c.head}>{c.cell(r)}</span>)}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
 
 // ---------- loading and errors ----------
+/** Grey bars where the content will appear, so the page does not jump when the data arrives. */
+export const Skeleton = () => (
+  <div className="skeleton" role="status" aria-busy="true" aria-label="Loading">
+    <span /><span /><span />
+  </div>
+);
+
 export function Load<T>({ q, children }: { q: { data: T | null; error: string | null; loading: boolean }; children: (d: T) => ReactNode }) {
   if (q.error) return <div className="error" role="alert">{q.error}</div>;
-  if (q.data === null) return <Empty>{q.loading ? 'Loading…' : 'Nothing to show.'}</Empty>;
+  if (q.data === null) return q.loading ? <Skeleton /> : <Empty>Nothing to show.</Empty>;
   return <>{children(q.data)}</>;
 }
 
@@ -100,7 +113,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastCtx.Provider value={push}>
       {children}
-      <div className="toasts" aria-live="polite">{items.map((t) => <div key={t.id} className={`toast${t.bad ? ' bad' : ''}`}>{t.text}</div>)}</div>
+      <div className="toasts" role="status" aria-live="polite">
+        {items.map((t) => (
+          <div key={t.id} className={`toast${t.bad ? ' bad' : ''}`}>
+            <span>{t.text}</span>
+            <button className="toast-x" aria-label="Dismiss" onClick={() => setItems((a) => a.filter((x) => x.id !== t.id))}>×</button>
+          </div>
+        ))}
+      </div>
     </ToastCtx.Provider>
   );
 }

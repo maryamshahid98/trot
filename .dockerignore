@@ -7,8 +7,6 @@
 .env
 .env.*
 !.env.example
-apps/web/*
-!apps/web/package.json
 apps/api/test
 docs
 *.md

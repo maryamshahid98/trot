@@ -2,6 +2,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { api, BRANCH, makeAccount, makeBranch, startApp, stopApp } from './helpers.ts';
 import { customer, staff } from './flow-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -22,11 +23,11 @@ describe('staff list for pickers', () => {
     const locked = await makeAccount({ role: 'coach', branchIds: [BRANCH], status: 'locked' });
     const res = await get('/staff?role=coach', reception.token);
     assert.equal(res.status, 200);
-    const ids = res.body.staff.map((s: any) => s.id);
+    const ids = res.body.staff.map((s: Json) => s.id);
     assert.ok(ids.includes(coach.id));
     assert.ok(!ids.includes(away.id), 'a coach from another branch is hidden');
     assert.ok(!ids.includes(locked.id), 'a locked account is hidden');
-    assert.ok(res.body.staff.every((s: any) => s.role === 'coach'));
+    assert.ok(res.body.staff.every((s: Json) => s.role === 'coach'));
     assert.deepEqual(Object.keys(res.body.staff[0]).sort(), ['fullName', 'id', 'role']);
   });
 
@@ -34,7 +35,7 @@ describe('staff list for pickers', () => {
     const manager = await staff('manager');
     const all = await get('/staff', manager.token);
     assert.equal(all.status, 200);
-    assert.ok(all.body.staff.every((s: any) => s.role !== 'customer'));
+    assert.ok(all.body.staff.every((s: Json) => s.role !== 'customer'));
     assert.equal((await get('/staff?role=customer', manager.token)).status, 400);
     assert.equal((await get('/staff?role=wizard', manager.token)).status, 400);
     const other = await makeBranch();

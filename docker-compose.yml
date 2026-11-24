@@ -42,6 +42,23 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       TRUST_PROXY: ${TRUST_PROXY:-0}
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-5242880}
+    volumes:
+      - trot-uploads:/data/uploads   # uploaded rider documents: back this volume up with the database
+
+  web:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # The address your BROWSER uses to reach the API. It is built into the site.
+        VITE_API_URL: ${WEB_API_URL:-http://localhost:3000}
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+    # The API must allow this address: add http://localhost:8080 to CORS_ORIGINS in .env.
 
 volumes:
   trot-data:
+  trot-uploads:

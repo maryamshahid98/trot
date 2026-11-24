@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { api, at, BRANCH, ctx, makeAccount, makeArena, makeBranch, randomDay, startApp, stopApp } from './helpers.ts';
 import { balanceOf, codes, guard, HOUR, liveBookings, makeClass, makePackage, makeRider, readyRider, verifyDocs } from './booking-helpers.ts';
 import { auditActions, customer, directBooking, post, staff, statusOf } from './flow-helpers.ts';
+import type { Json } from './helpers.ts';
 
 const DAY = 24 * HOUR;
 let M: Awaited<ReturnType<typeof staff>>; // a manager
@@ -119,7 +120,7 @@ describe('ride types: the catalogue', () => {
     const om = await staff('manager', [ob]);
     assert.equal((await get(`/ride-types/${id}`, om.token)).status, 404);
     assert.equal((await patch(`/ride-types/${id}`, om.token, { priceMinor: 1 })).status, 404);
-    assert.ok(!(await get('/ride-types', om.token)).body.rideTypes.some((t: any) => t.id === id));
+    assert.ok(!(await get('/ride-types', om.token)).body.rideTypes.some((t: Json) => t.id === id));
     assert.equal((await post('/ride-types', om.token, typeBody({ branchId: BRANCH }))).status, 403);
     assert.equal((await post('/ride-types', M.token, typeBody({ branchId: ob }))).status, 403);
     assert.equal((await get(`/ride-types?branchId=${ob}`, M.token)).status, 403);
@@ -133,13 +134,13 @@ describe('ride types: the catalogue', () => {
     const c = await customer();
     const cust = await get('/ride-types?includeInactive=true', c.token);
     assert.equal(cust.status, 200);
-    const ids = cust.body.rideTypes.map((t: any) => t.id);
+    const ids = cust.body.rideTypes.map((t: Json) => t.id);
     assert.ok(ids.includes(on) && !ids.includes(off));
     assert.equal((await get(`/ride-types/${on}`, c.token)).status, 200);
     assert.equal((await get(`/ride-types/${off}`, c.token)).status, 404, 'a switched-off type does not exist for customers');
 
-    assert.ok((await get('/ride-types', R.token)).body.rideTypes.some((t: any) => t.id === off));
-    assert.ok(!(await get('/ride-types?includeInactive=false', R.token)).body.rideTypes.some((t: any) => t.id === off));
+    assert.ok((await get('/ride-types', R.token)).body.rideTypes.some((t: Json) => t.id === off));
+    assert.ok(!(await get('/ride-types?includeInactive=false', R.token)).body.rideTypes.some((t: Json) => t.id === off));
     const one = (await get(`/ride-types/${off}`, R.token)).body;
     assert.deepEqual([one.priceMinor, one.durationMinutes, one.capacity, one.minLevel, one.minAgeYears, one.active, one.activeFrom], [11500, 60, 4, 'beginner', null, false, null]);
   });
@@ -227,7 +228,7 @@ describe('scheduling a ride', () => {
     const over = await scheduleRide(t, { hour: 8, capacity: 5 });
     assert.equal(over.res.status, 422);
     assert.deepEqual(codes(over.res), ['CAPACITY_OVER_TYPE']);
-    for (const c of [0, -1, 2.5, '3']) assert.equal((await scheduleRide(t, { hour: 8, capacity: c as any })).res.status, 400, String(c));
+    for (const c of [0, -1, 2.5, '3']) assert.equal((await scheduleRide(t, { hour: 8, capacity: c as Json })).res.status, 400, String(c));
   });
 
   test('a switched-off type cannot be scheduled; open-from and open-until dates use the branch\'s own calendar day', async () => {
@@ -332,7 +333,7 @@ describe('scheduling a ride', () => {
     const ids = async (extra: string, token = R.token) => {
       const r = await get(q(extra), token);
       assert.equal(r.status, 200, r.text);
-      return new Set<string>(r.body.map((o: any) => o.id));
+      return new Set<string>(r.body.map((o: Json) => o.id));
     };
     const rides = await ids('&kind=ride');
     assert.ok(rides.has(published) && rides.has(draft) && !rides.has(klass));
@@ -342,7 +343,7 @@ describe('scheduling a ride', () => {
     assert.ok(both.has(published) && both.has(klass));
     assert.equal((await get(q('&kind=bogus'), R.token)).status, 400);
 
-    const row = (await get(q('&kind=ride'), R.token)).body.find((o: any) => o.id === published);
+    const row = (await get(q('&kind=ride'), R.token)).body.find((o: Json) => o.id === published);
     assert.deepEqual([row.format, row.rideTypeId, row.minAgeYears, row.priceMinor], ['ride', t, 6, 11500]);
     const c = await customer();
     const seen = await ids('&kind=ride', c.token);

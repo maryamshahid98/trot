@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { api, ctx, makeAccount, makeBranch, randomDay, startApp, stopApp } from './helpers.ts';
 import { codes, DAY, HOUR, makeClass, makeRider, verifyDocs } from './booking-helpers.ts';
 import { directBooking, staff } from './flow-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -70,7 +71,7 @@ describe('revenue', () => {
     assert.equal(res.body.refundsMinor, 3000);
     assert.equal(res.body.netMinor, 22000);
     assert.equal(res.body.otherAdjustments.creditMinor, 500);
-    assert.deepEqual(res.body.byMethod.map((m: any) => [m.method, m.receipts, m.amountMinor]), [['card_at_desk', 1, 5000], ['cash', 2, 20000]]);
+    assert.deepEqual(res.body.byMethod.map((m: Json) => [m.method, m.receipts, m.amountMinor]), [['card_at_desk', 1, 5000], ['cash', 2, 20000]]);
     assert.deepEqual(res.body.byDay, [{ day: iso(day).slice(0, 10), amountMinor: 25000 }]);
   });
 
@@ -95,7 +96,7 @@ describe('attendance', () => {
     const res = await get(`/reports/attendance?${range(day)}`, manager.token);
     assert.equal(res.status, 200);
     assert.deepEqual([res.body.classes, res.body.attended, res.body.noShows, res.body.cancelled, res.body.attendanceRate], [1, 3, 1, 1, 0.75]);
-    assert.deepEqual(res.body.perCoach.map((c: any) => [c.coachId, c.classes, c.attended, c.noShows]), [[coach.id, 1, 3, 1]]);
+    assert.deepEqual(res.body.perCoach.map((c: Json) => [c.coachId, c.classes, c.attended, c.noShows]), [[coach.id, 1, 3, 1]]);
   });
 
   test('no finished classes means no rate, not a divide-by-zero', async () => {
@@ -136,7 +137,7 @@ describe('unpaid', () => {
     await directBooking({ occurrenceId, riderId: await rider(branch), status: 'pending_office_payment', payWith: 'office', holdExpiresInMin: 5, branchId: branch });
     const res = await get('/reports/unpaid', manager.token);
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.unpaid.map((u: any) => [u.bookingId, u.reason, u.priceMinor]), [[owing, 'Pays on Thursday', 15000]]);
+    assert.deepEqual(res.body.unpaid.map((u: Json) => [u.bookingId, u.reason, u.priceMinor]), [[owing, 'Pays on Thursday', 15000]]);
     assert.equal(res.body.owedMinor, 15000);
     assert.equal((await get('/reports/unpaid?limit=0', manager.token)).status, 400);
     assert.equal((await get('/reports/unpaid?limit=999', manager.token)).status, 400);
@@ -165,8 +166,8 @@ describe('audit log', () => {
     await ctx.admin.query(`INSERT INTO audit_log (action, entity, entity_id) VALUES ('test.nobranch','thing','x')`);
     const res = await get('/audit-log', manager.token);
     assert.equal(res.status, 200);
-    assert.deepEqual(res.body.entries.map((e: any) => e.action), ['test.mine', 'test.mine', 'test.mine']);
-    const ids = res.body.entries.map((e: any) => Number(e.id));
+    assert.deepEqual(res.body.entries.map((e: Json) => e.action), ['test.mine', 'test.mine', 'test.mine']);
+    const ids = res.body.entries.map((e: Json) => Number(e.id));
     assert.deepEqual(ids, [...ids].sort((a, b) => b - a));
     assert.equal(res.body.entries[0].actorName, 'Test manager');
     assert.equal(res.body.nextBefore, null);
@@ -184,7 +185,7 @@ describe('audit log', () => {
     const third = await get(`/audit-log?action=test.page&limit=2&before=${second.body.nextBefore}`, manager.token);
     assert.equal(third.body.entries.length, 1);
     assert.equal(third.body.nextBefore, null);
-    const all = [...first.body.entries, ...second.body.entries, ...third.body.entries].map((e: any) => e.id);
+    const all = [...first.body.entries, ...second.body.entries, ...third.body.entries].map((e) => e.id);
     assert.equal(new Set(all).size, 5, 'no entry is repeated or missed');
     assert.equal((await get('/audit-log?entityId=e0&action=test.page', manager.token)).body.entries.length, 1);
     assert.equal((await get('/audit-log?entity=thing&action=test.other', manager.token)).body.entries.length, 1);

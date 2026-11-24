@@ -1,8 +1,10 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { ACCOUNT_STATUS, BEARER_PREFIX } from '../config/constants.ts';
+import { APP_CONFIG } from '../config/env.ts';
+import type { AppConfig } from '../config/env.ts';
 import { DbService } from '../db/db.service.ts';
-import { IS_PUBLIC, ROLES_KEY } from './decorators.ts';
+import { ALLOW_WITHOUT_MFA, IS_PUBLIC, ROLES_KEY } from './decorators.ts';
 import type { AuthUser } from './decorators.ts';
 import { TokenService } from './tokens.ts';
 
@@ -16,6 +18,7 @@ export class AuthGuard implements CanActivate {
     @Inject(Reflector) private readonly reflector: Reflector,
     @Inject(TokenService) private readonly tokens: TokenService,
     @Inject(DbService) private readonly db: DbService,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -35,6 +38,7 @@ export class AuthGuard implements CanActivate {
 
     const r = await this.db.query(
       `SELECT a.id, a.role, a.full_name, a.status,
+              coalesce((SELECT true FROM account_mfa m WHERE m.account_id = a.id AND m.confirmed_at IS NOT NULL), false) AS mfa_enabled,
               COALESCE(array_agg(ab.branch_id::text) FILTER (WHERE ab.branch_id IS NOT NULL), '{}') AS branch_ids
          FROM accounts a LEFT JOIN account_branches ab ON ab.account_id = a.id
         WHERE a.id = $1 GROUP BY a.id`,
@@ -43,8 +47,15 @@ export class AuthGuard implements CanActivate {
     const a = r.rows[0];
     if (!a || a.status !== ACCOUNT_STATUS.ACTIVE) throw new UnauthorizedException('Your session is not valid. Please sign in again.');
 
-    const user: AuthUser = { id: a.id, role: a.role, fullName: a.full_name, branchIds: a.branch_ids };
+    const mfaEnabled = a.mfa_enabled === true;
+    const mfaEnrollmentRequired = !mfaEnabled && this.config.auth.mfaRequiredRoles.includes(a.role);
+    const user: AuthUser = { id: a.id, role: a.role, fullName: a.full_name, branchIds: a.branch_ids, mfaEnabled, mfaEnrollmentRequired };
     req.user = user;
+    // The club requires two-step sign-in for this role and it is not set up: nothing works except setting it up. Checked on every request,
+    // so a change of policy applies at once.
+    if (mfaEnrollmentRequired && !this.reflector.getAllAndOverride<boolean>(ALLOW_WITHOUT_MFA, targets)) {
+      throw new ForbiddenException({ message: 'Your role must use two-step sign-in. Set it up first.', problems: [{ code: 'MFA_ENROLLMENT_REQUIRED', message: 'Set up two-step sign-in to continue.' }] });
+    }
 
     const roles = this.reflector.getAllAndOverride<string[] | undefined>(ROLES_KEY, targets);
     if (roles && !roles.includes(user.role)) throw new ForbiddenException('Your role cannot do this.');

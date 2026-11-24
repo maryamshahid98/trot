@@ -46,13 +46,30 @@ export const PG_ERROR = {
 } as const;
 
 /** Audit log vocabulary. */
-export const ENTITY = { ACCOUNT: 'account', OCCURRENCE: 'occurrence', BOOKING: 'booking', WAITLIST_ENTRY: 'waitlist_entry', RIDER: 'rider', DOCUMENT: 'document', PACKAGE_TYPE: 'package_type', PACKAGE: 'package', RECEIPT: 'receipt', ADJUSTMENT: 'adjustment', HORSE: 'horse', ASSIGNMENT: 'horse_assignment', BRANCH: 'branch', INCIDENT: 'incident', ARENA: 'arena', ARENA_CLOSURE: 'arena_closure', STAFF_LEAVE: 'staff_leave', RIDE_TYPE: 'ride_type' } as const;
+export const ENTITY = { ACCOUNT: 'account', OCCURRENCE: 'occurrence', BOOKING: 'booking', WAITLIST_ENTRY: 'waitlist_entry', RIDER: 'rider', DOCUMENT: 'document', PACKAGE_TYPE: 'package_type', PACKAGE: 'package', RECEIPT: 'receipt', ADJUSTMENT: 'adjustment', HORSE: 'horse', ASSIGNMENT: 'horse_assignment', BRANCH: 'branch', INCIDENT: 'incident', ARENA: 'arena', ARENA_CLOSURE: 'arena_closure', STAFF_LEAVE: 'staff_leave', RIDE_TYPE: 'ride_type', NOTIFICATION: 'notification', SKILL: 'skill', ASSESSMENT: 'assessment', INVOICE: 'invoice', CREDIT_NOTE: 'credit_note' } as const;
 export const AUDIT = {
   LOGIN: 'auth.login',
   LOGIN_FAILED: 'auth.login_failed',
   REFRESH_REUSE_DETECTED: 'auth.refresh_reuse_detected',
   PASSWORD_CHANGED: 'auth.password_changed',
   OCCURRENCE_CREATE: 'occurrence.create',
+  SERIES_CREATE: 'series.create',
+  NOTIFICATION_RETRY: 'notification.retry',
+  INVOICE_ISSUE: 'invoice.issue',
+  CREDIT_NOTE_ISSUE: 'credit_note.issue',
+  MFA_ENABLED: 'auth.mfa_enabled',
+  MFA_DISABLED: 'auth.mfa_disabled',
+  MFA_RESET: 'auth.mfa_reset',
+  MFA_RECOVERY_USED: 'auth.mfa_recovery_used',
+  MFA_CODES_REGENERATED: 'auth.mfa_codes_regenerated',
+  SKILL_CREATE: 'skill.create',
+  SKILL_UPDATE: 'skill.update',
+  ASSESSMENT_CREATE: 'assessment.create',
+  ASSESSMENT_SUBMIT: 'assessment.submit',
+  ASSESSMENT_DECIDE: 'assessment.decide',
+  DOCUMENT_FILE_ATTACH: 'document.file_attach',
+  DOCUMENT_FILE_VIEW: 'document.file_view',
+  SERIES_CANCEL: 'series.cancel',
   OCCURRENCE_CREATE_OVERRIDE: 'occurrence.create_override',
   BOOKING_CREATE: 'booking.create',
   BOOKING_WAITLIST: 'booking.waitlist',
@@ -124,6 +141,7 @@ export const LIMITS = {
   overrideReasonMax: 500,
   userAgentMax: 300,
   scheduleMaxRangeDays: 62,
+  seriesMaxSessions: 52,
   scheduleListLimit: 1000,
   bookingsListLimit: 200,
   checkInOpensMinutes: 60,
@@ -168,6 +186,13 @@ export const LIMITS = {
   nameMax: 120,
   notesMax: 2000,
   fileRefMax: 500,
+  uploadFileNameMax: 120,
+  ratingMax: 5, // a skill is rated 1 to 5
+  mfaTokenSeconds: 300, // after the password is accepted, the code must follow within this time
+  mfaRecoveryCodes: 10,
+  notificationBatch: 50, // messages sent per branch per run of the sender
+  notificationLeaseMinutes: 5, // a message claimed by a sender that then died is picked up again after this long
+  notificationMaxAttempts: 5,
   reasonMax: 500,
   searchMax: 100,
   earliestBirthYear: 1900,
@@ -183,8 +208,9 @@ export const SCRYPT = { N: 16384, R: 8, P: 1, keyLength: 64, saltBytes: 16 } as 
 
 /** Headers and CORS rules that are the same in every environment. */
 export const CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'";
-export const CORS_METHODS = ['GET', 'POST', 'PATCH', 'DELETE'];
-export const CORS_HEADERS = ['authorization', 'content-type', 'x-trot-client'];
+// Every method the API uses. A method missing here is blocked by the BROWSER before the request is sent (tools like curl do not notice).
+export const CORS_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+export const CORS_HEADERS = ['authorization', 'content-type', 'x-trot-client', 'x-file-name'];
 
 /**
  * The website keeps its refresh token in a cookie that scripts cannot read. It says it is the website with this header,
@@ -259,6 +285,8 @@ export const RIDER_PROBLEM = {
   NOT_ALLOWED_STATUS: 'NOT_ALLOWED_STATUS',
   SAME_STATUS: 'SAME_STATUS',
   DOCUMENT_NOT_PENDING: 'DOCUMENT_NOT_PENDING',
+  FILE_ALREADY_ATTACHED: 'FILE_ALREADY_ATTACHED',
+  FILE_TYPE_MISMATCH: 'FILE_TYPE_MISMATCH',
   DOCUMENT_ALREADY_EXPIRED: 'DOCUMENT_ALREADY_EXPIRED',
   GUARDIAN_NOT_ELIGIBLE: 'GUARDIAN_NOT_ELIGIBLE',
   LAST_GUARDIAN: 'LAST_GUARDIAN',
@@ -291,6 +319,8 @@ export const ADJUSTMENT_KIND = { REFUND: 'refund', CREDIT: 'credit', WRITE_OFF: 
 /** Prices are shown VAT-inclusive; this is the share of a price that is VAT. Saudi standard rate. Confirm with the club's accountant. */
 export const VAT_PERCENT = 15;
 export const RECEIPT_PREFIX = 'R-';
+export const INVOICE_PREFIX = 'I-';
+export const CREDIT_NOTE_PREFIX = 'CN-';
 export const PAYMENT_PROBLEM = {
   PACKAGE_TYPE_UNAVAILABLE: 'PACKAGE_TYPE_UNAVAILABLE',
   RIDER_NOT_ACTIVE: 'RIDER_NOT_ACTIVE',
