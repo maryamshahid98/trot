@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { FRONT_DESK } from '../constants';
 import type { Role } from '../constants';
-import { addDays, dayEndIso, dayStartIso, fmtDay, fmtTime, label, todayLocal, weekStart } from '../lib/format';
+import { addDays, dayEndIso, dayStartIso, fmtDay, fmtTime, label, places, todayLocal, weekStart } from '../lib/format';
 import { useBranch } from '../lib/branch';
 import { qs, useQuery } from '../lib/useApi';
 import type { Occurrence } from '../lib/types';
@@ -45,7 +45,7 @@ export function Calendar() {
                   <button key={o.id} className={`ev${o.rideTypeId ? ' ride' : ''} ${o.status}`} onClick={() => setOpen(o)}>
                     <b>{fmtTime(o.startsAt)} {o.title}</b>
                     <span>{o.arenaName} · {o.coachName}</span>
-                    <span>{label(o.status)} · {o.capacity} places</span>
+                    <span>{label(o.status)} · {places(o.capacity)}</span>
                   </button>
                 ))}
               </div>

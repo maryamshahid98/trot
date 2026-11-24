@@ -1,4 +1,6 @@
-# Deploying the API
+# Deploying Trot
+
+Two images: the API (`apps/api/Dockerfile`) and the staff web portal (`apps/web/Dockerfile`). The API section comes first; the web portal is [further down](#deploying-the-web-portal).
 
 The API ships as a Docker image (`apps/api/Dockerfile`). It needs a PostgreSQL 16 database and a handful of settings.
 It keeps no state of its own, so you can run more than one copy behind a load balancer: sign-in rate limits are
@@ -58,18 +60,44 @@ health check on it. Point your load balancer at the same address. It is exempt f
 ## Trying the whole stack on one machine
 
 ```
-# .env needs JWT_SECRET and APP_DB_PASSWORD
+# .env needs JWT_SECRET and APP_DB_PASSWORD, and CORS_ORIGINS=http://localhost:8080
 docker compose --profile app up --build -d
 docker compose --profile app run --rm api npm --workspace @trot/api run db:migrate
-curl http://localhost:3000/health
+curl http://localhost:3000/health     # the API
+# the portal: http://localhost:8080
 ```
 
 `docker-compose.yml` is for development: it publishes the database port and has a default superuser password of
 `trot`. Do not use it as a production setup.
 
+## Deploying the web portal
+
+`apps/web/Dockerfile` builds the site and serves it with nginx (about 75 MB, runs as an unprivileged user, listens on port 8080).
+
+```
+docker build -f apps/web/Dockerfile --build-arg VITE_API_URL=https://api.club.example -t trot-web .
+docker run -p 8080:8080 trot-web
+```
+
+- **`VITE_API_URL` is required and is built into the site.** It must be the address people's browsers use to reach the
+  API. The build stops with a message if you leave it out, because the site would otherwise quietly call `localhost`.
+  Changing the API address means building the image again.
+- **The portal and the API must be on the same site.** The sign-in cookie is `SameSite=strict`, so the browser only
+  sends it when both addresses share the same registrable domain: `portal.club.example` and `api.club.example` work;
+  `club-portal.com` and `club-api.net` do not. On different domains people are signed out every time they reload the
+  page. This is a security setting, not a bug, so choose the addresses to suit it.
+- **Tell the API about the portal.** Set the API's `CORS_ORIGINS` to the portal's exact address
+  (`https://portal.club.example`) and `COOKIE_SECURE=true`. Both addresses must be https.
+- The image already gives every page the right security headers (a Content-Security-Policy that allows calls only to the
+  API address, no framing, no sniffing), caches the hashed files for a year, never caches the page itself, and sends
+  addresses such as `/calendar` to the app so refreshing works. `GET /healthz` answers `ok` for a load balancer.
+- The site loads its fonts from Google Fonts. If the club's network or privacy rules do not allow that, the fonts need
+  to be hosted locally first (and the Content-Security-Policy in `apps/web/nginx/default.conf.template` updated).
+
+You can also skip the image: `npm --workspace @trot/web run build`, then upload `apps/web/dist` to any static host. That host
+must send unknown addresses to `index.html` and should set the same headers.
+
 ## What is not included
 
-- **The website** (`apps/web`) is static files: `npm --workspace @trot/web run build`, then upload `apps/web/dist` to any
-  static host. Set `VITE_API_URL` to the API's address when you build.
 - **TLS** is terminated by your load balancer or reverse proxy, not by the API.
 - **Backups, monitoring and log collection** belong to your platform. The API logs to standard output.

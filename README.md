@@ -39,7 +39,7 @@ CI (`.github/workflows/ci.yml`) runs on every pull request: dependency audit, li
 
 ## Deploying
 
-The API has a Dockerfile. See [`docs/deployment.md`](docs/deployment.md) for the settings, the first-deployment steps and what is not covered.
+The API and the web portal each have a Dockerfile. See [`docs/deployment.md`](docs/deployment.md) for the settings, the first-deployment steps, the rule that the portal and the API must share a domain, and what is not covered.
 
 ## Getting started
 

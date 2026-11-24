@@ -1,0 +1,45 @@
+# Filled in when the container starts: ${API_ORIGIN} is replaced with the API address. Everything starting with $ below is nginx's own.
+
+# Files in /assets have a hash in their name, so they can be cached for a year. The page itself must always be re-checked.
+map $uri $cache_control {
+    default            "no-cache";
+    ~^/assets/         "public, max-age=31536000, immutable";
+}
+
+server {
+    listen 8080;
+    server_name _;
+    server_tokens off;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+
+    add_header Cache-Control $cache_control always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
+    # Scripts only from this site. Styles may be inline because the screens set some layout values directly. Fonts come from Google Fonts.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' ${API_ORIGIN}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+
+    # For a load balancer's health check.
+    location = /healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok";
+    }
+
+    # A file that is not there is a real 404. (Handing back the page instead would make a stale or half-deployed site hard to diagnose.)
+    location /assets/ {
+        try_files $uri =404;
+    }
+
+    # Every screen is a route inside the one page, so an address such as /calendar must give back index.html
+    # (otherwise opening or refreshing it directly is a 404).
+    location / {
+        try_files $uri /index.html;
+    }
+}

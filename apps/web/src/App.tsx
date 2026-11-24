@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
 import { NAV, PATH } from './constants';
 import { Shell } from './layout/Shell';
+import { Logo } from './ui/Logo';
 import { t } from './i18n';
 import { Admin } from './pages/Admin';
 import { Bookings } from './pages/Bookings';
@@ -24,7 +25,7 @@ const PAGES: Record<string, ReactElement> = {
 
 export function App() {
   const { user, ready } = useAuth();
-  if (!ready) return <div className="login">{t.shell.loading}</div>;
+  if (!ready) return <div className="boot" role="status" aria-label={t.shell.loading}><Logo size={34} /><span className="spinner" aria-hidden="true" /></div>;
   const allowed = NAV.filter((n) => user && (n.roles as readonly string[]).includes(user.role));
   return (
     <Routes>

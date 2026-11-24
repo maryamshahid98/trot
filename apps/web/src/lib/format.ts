@@ -29,6 +29,9 @@ export function money(minor: number | string | null | undefined, currency = 'SAR
 }
 export const toMinor = (major: string | number): number => Math.round(Number(major) * 100);
 export const fromMinor = (minor: number): string => (minor / 100).toFixed(2);
+/** "1 place", "2 places". */
+export const places = (n: number): string => `${n} ${n === 1 ? 'place' : 'places'}`;
+
 export const pct = (v: number | null | undefined): string => (v === null || v === undefined ? '—' : `${Math.round(v * 100)}%`);
 
 /** 'pending_office_payment' -> 'Pending office payment' */

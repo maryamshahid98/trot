@@ -12,7 +12,7 @@ export const en = {
     offline: 'Cannot reach the server. Check that the API is running.',
   },
   shell: {
-    search: 'Search riders, horses, bookings', branch: 'Branch', signOut: 'Sign out', theme: 'Change theme',
+    search: 'Search riders by name', searchLabel: 'Search riders', menu: 'Menu', skip: 'Skip to content', branch: 'Branch', signOut: 'Sign out', theme: 'Change theme',
     language: 'Language', loading: 'Loading…',
   },
   page: { comingSoon: 'This screen is built next.', welcome: 'Welcome', signedInAs: 'Signed in as' },
