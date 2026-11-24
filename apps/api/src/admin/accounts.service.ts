@@ -186,6 +186,25 @@ export class AccountsService {
     });
   }
 
+  /**
+   * A manager or owner removes a colleague's two-step sign-in, for someone who has lost their phone AND their recovery codes. Their sign-ins end.
+   * If their role must use two-step sign-in they have to set it up again before doing anything else.
+   */
+  async resetMfa(rawId: string, user: AuthUser) {
+    const { id } = parse(IdParam, { id: rawId });
+    return this.db.tx(async (c) => {
+      const t = await this.target(c, id, user);
+      this.outranks(user, t);
+      this.notDeleted(t);
+      this.requireStaff(t);
+      await c.query(`DELETE FROM mfa_recovery_codes WHERE account_id = $1`, [id]);
+      await c.query(`DELETE FROM account_mfa WHERE account_id = $1`, [id]);
+      await this.revokeSessions(c, id);
+      await writeAudit(c, user, t.branchId, AUDIT.MFA_RESET, ENTITY.ACCOUNT, id, {});
+      return { id, mfaReset: true };
+    });
+  }
+
   /** A manager sets a new password for a staff member who is locked out. Every sign-in of theirs ends. */
   async resetPassword(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });

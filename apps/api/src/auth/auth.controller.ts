@@ -1,8 +1,9 @@
 import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { parse } from '../common/validate.ts';
 import { ChangePasswordBody, LoginBody, RefreshBody } from './auth.schemas.ts';
+import { MfaService } from './mfa.service.ts';
 import { AuthService } from './auth.service.ts';
-import { CurrentUser, Public } from './decorators.ts';
+import { AllowWithoutMfa, CurrentUser, Public } from './decorators.ts';
 import type { AuthUser } from './decorators.ts';
 import { RateLimitGuard } from './rate-limit.guard.ts';
 import { APP_CONFIG } from '../config/env.ts';
@@ -16,13 +17,15 @@ export class AuthController {
   constructor(
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Inject(MfaService) private readonly mfa: MfaService,
   ) {}
 
   /** The website gets its refresh token as a cookie only; everyone else gets it in the body. */
-  private deliver<T extends { refreshToken?: string }>(req: ApiRequest, res: ApiResponse, result: T): Omit<T, 'refreshToken'> | T {
-    if (!isWebClient(req) || !result.refreshToken) return result;
-    setRefreshCookie(res, result.refreshToken, this.config.auth.refreshTtlDays, this.config.auth.cookieSecure);
-    const { refreshToken: _omit, ...rest } = result;
+  private deliver<T extends object>(req: ApiRequest, res: ApiResponse, result: T): Omit<T, 'refreshToken'> | T {
+    const refreshToken = (result as { refreshToken?: string }).refreshToken; // a two-step sign-in's first answer has none yet
+    if (!isWebClient(req) || !refreshToken) return result;
+    setRefreshCookie(res, refreshToken, this.config.auth.refreshTtlDays, this.config.auth.cookieSecure);
+    const { refreshToken: _omit, ...rest } = result as T & { refreshToken?: string };
     return rest;
   }
 
@@ -62,7 +65,33 @@ export class AuthController {
     return token ? this.auth.logout(token) : { ok: true };
   }
 
-  @Get('me')
+  /** The second step of a two-step sign-in: the token from login plus a code from the authenticator app, or a recovery code. */
+  @Post('mfa/verify')
+  @HttpCode(200)
+  @Public()
+  @UseGuards(RateLimitGuard)
+  async verifyMfa(@Body() body: unknown, @Req() req: ApiRequest, @Res({ passthrough: true }) res: ApiResponse) {
+    return this.deliver(req, res, await this.mfa.verifyLogin(body, req.headers['user-agent']));
+  }
+
+  @Get('mfa') @AllowWithoutMfa()
+  mfaStatus(@CurrentUser() user: AuthUser) { return this.mfa.status(user); }
+
+  /** Starts set-up: a secret and an address to scan with an authenticator app. */
+  @Post('mfa/setup') @HttpCode(200) @AllowWithoutMfa()
+  mfaSetup(@CurrentUser() user: AuthUser) { return this.mfa.setup(user); }
+
+  /** Confirms set-up with a code from the app. Answers with recovery codes, shown only this once. */
+  @Post('mfa/enable') @HttpCode(200) @AllowWithoutMfa()
+  mfaEnable(@Body() body: unknown, @CurrentUser() user: AuthUser) { return this.mfa.enable(user, body); }
+
+  @Post('mfa/disable') @HttpCode(200)
+  mfaDisable(@Body() body: unknown, @CurrentUser() user: AuthUser) { return this.mfa.disable(user, body); }
+
+  @Post('mfa/recovery-codes') @HttpCode(200)
+  mfaRecoveryCodes(@Body() body: unknown, @CurrentUser() user: AuthUser) { return this.mfa.regenerateRecoveryCodes(user, body); }
+
+  @Get('me') @AllowWithoutMfa()
   me(@CurrentUser() user: AuthUser) {
     return user;
   }

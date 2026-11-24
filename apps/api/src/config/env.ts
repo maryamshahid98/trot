@@ -6,7 +6,7 @@
 //  - A blank line in .env counts as "not set", so it uses the default instead of silently becoming 0 or NaN.
 //  - A value that is not a number, or is out of range, stops the start. It never quietly turns a protection off.
 import { z } from 'zod';
-import { TEST_DATABASE_SUFFIX } from './constants.ts';
+import { ROLES, TEST_DATABASE_SUFFIX } from './constants.ts';
 
 export const APP_CONFIG = 'APP_CONFIG';
 
@@ -60,6 +60,13 @@ const RuntimeEnv = z.object({
   UPLOAD_DIR: text('./data/uploads'),
   UPLOAD_MAX_BYTES: int(1_024, 26_214_400, 5_242_880),
 
+  // Two-step sign-in. Anyone may switch it on for their own account. These roles MUST: until they have set it up they can sign in but do
+  // nothing except set it up. Comma separated, for example: owner,manager. Blank = nobody is forced.
+  MFA_REQUIRED_ROLES: z.preprocess(blankIsUnset, z.string().default('')),
+  // Encrypts the authenticator secrets in the database. Blank = derived from JWT_SECRET (then changing JWT_SECRET makes everyone set it up again).
+  MFA_ENCRYPTION_KEY: optionalText(32),
+  MFA_ISSUER: text('Trot'), // the name an authenticator app shows
+
   // Messages. "log" writes a line to the log instead of sending (development); "off" sends nothing and records the message as skipped.
   NOTIFY_EMAIL: z.preprocess(blankIsUnset, z.enum(['log', 'smtp', 'off']).default('log')),
   NOTIFY_SMS: z.preprocess(blankIsUnset, z.enum(['log', 'off']).default('off')),
@@ -74,6 +81,9 @@ const RuntimeEnv = z.object({
   PACKAGE_EXPIRY_NOTICE_DAYS: int(1, 60, 7),
   DOCUMENT_EXPIRY_NOTICE_DAYS: int(1, 90, 14),
 }).superRefine((e, ctx) => {
+  const roles = e.MFA_REQUIRED_ROLES.split(',').map((s) => s.trim()).filter(Boolean);
+  const unknown = roles.filter((r) => !(ROLES as readonly string[]).includes(r));
+  if (unknown.length) ctx.addIssue({ code: 'custom', path: ['MFA_REQUIRED_ROLES'], message: `has unknown roles: ${unknown.join(', ')}. Use any of: ${ROLES.join(', ')}` });
   if (e.NOTIFY_EMAIL === 'smtp') {
     if (!e.SMTP_HOST) ctx.addIssue({ code: 'custom', path: ['SMTP_HOST'], message: 'is required when NOTIFY_EMAIL=smtp' });
     if (!e.EMAIL_FROM) ctx.addIssue({ code: 'custom', path: ['EMAIL_FROM'], message: 'is required when NOTIFY_EMAIL=smtp' });
@@ -90,6 +100,9 @@ export interface AppConfig {
     accessTtlSeconds: number;
     refreshTtlDays: number;
     cookieSecure: boolean;
+    mfaRequiredRoles: string[];
+    mfaEncryptionKey: string;
+    mfaIssuer: string;
     maxFailedLogins: number;
     lockoutMinutes: number;
   };
@@ -128,6 +141,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       accessTtlSeconds: e.ACCESS_TOKEN_TTL_SECONDS,
       refreshTtlDays: e.REFRESH_TOKEN_TTL_DAYS,
       cookieSecure: e.COOKIE_SECURE,
+      mfaRequiredRoles: e.MFA_REQUIRED_ROLES.split(',').map((s) => s.trim()).filter(Boolean),
+      mfaEncryptionKey: e.MFA_ENCRYPTION_KEY ?? e.JWT_SECRET,
+      mfaIssuer: e.MFA_ISSUER,
       maxFailedLogins: e.MAX_FAILED_LOGINS,
       lockoutMinutes: e.LOCKOUT_MINUTES,
     },

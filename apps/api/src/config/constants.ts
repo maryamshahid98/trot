@@ -57,6 +57,11 @@ export const AUDIT = {
   NOTIFICATION_RETRY: 'notification.retry',
   INVOICE_ISSUE: 'invoice.issue',
   CREDIT_NOTE_ISSUE: 'credit_note.issue',
+  MFA_ENABLED: 'auth.mfa_enabled',
+  MFA_DISABLED: 'auth.mfa_disabled',
+  MFA_RESET: 'auth.mfa_reset',
+  MFA_RECOVERY_USED: 'auth.mfa_recovery_used',
+  MFA_CODES_REGENERATED: 'auth.mfa_codes_regenerated',
   SKILL_CREATE: 'skill.create',
   SKILL_UPDATE: 'skill.update',
   ASSESSMENT_CREATE: 'assessment.create',
@@ -183,6 +188,8 @@ export const LIMITS = {
   fileRefMax: 500,
   uploadFileNameMax: 120,
   ratingMax: 5, // a skill is rated 1 to 5
+  mfaTokenSeconds: 300, // after the password is accepted, the code must follow within this time
+  mfaRecoveryCodes: 10,
   notificationBatch: 50, // messages sent per branch per run of the sender
   notificationLeaseMinutes: 5, // a message claimed by a sender that then died is picked up again after this long
   notificationMaxAttempts: 5,

@@ -21,6 +21,7 @@ export class AccountsController {
   @Post(':id/role') @Roles(...MANAGERS) role(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.accounts.setRole(id, b, u); }
   @Post(':id/status') @Roles(...MANAGERS) status(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.accounts.setStatus(id, b, u); }
   @Post(':id/unlock') @Roles(...MANAGERS) unlock(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.accounts.unlock(id, u); }
+  @Post(':id/mfa/reset') @Roles(...MANAGERS) resetMfa(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.accounts.resetMfa(id, u); }
   @Post(':id/reset-password') @Roles(...MANAGERS) reset(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.accounts.resetPassword(id, b, u); }
   @Put(':id/branches') @Roles(...MANAGERS) branches(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.accounts.setBranches(id, b, u); }
 }

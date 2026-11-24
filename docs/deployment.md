@@ -87,6 +87,23 @@ under **Messages** in the portal and can send now or try a failed message again.
 - **SMS and push are not built in.** The message is recorded as `skipped`. Adding a provider means one class in
   `apps/api/src/notifications/providers.ts`; nothing else changes.
 
+## Two-step sign-in
+
+Staff (and customers, if they want) can protect their account with an authenticator app (Google Authenticator, Microsoft
+Authenticator, Authy, 1Password and similar): **Security** in the portal, then scan the QR code and confirm with a code. Ten one-use
+recovery codes are shown once, for a lost phone.
+
+- **To require it for chosen roles**, set `MFA_REQUIRED_ROLES` (for example `owner,manager`). Those people can sign in but can do nothing
+  except set it up until they have, and cannot turn it off. A change applies on their very next request.
+- **Set `MFA_ENCRYPTION_KEY`** (at least 32 random characters) before anyone enrols, and keep it in the secret store like `JWT_SECRET`.
+  It encrypts each authenticator secret in the database, so a stolen copy of the database alone cannot produce codes. If it is left blank
+  the key is derived from `JWT_SECRET`, and changing `JWT_SECRET` later would force everybody to set up again.
+- A code can be used once. A wrong code counts toward the same account lock-out as a wrong password.
+- **A colleague who lost their phone and their recovery codes:** a manager or owner uses **Reset two-step sign-in** on the Staff screen
+  (or `POST /accounts/:id/mfa/reset`). Their sign-ins end and, if their role requires it, they set it up again at the next sign-in.
+- The phone's clock must be right (automatic time). Codes are accepted for the current 30 seconds and one step either side.
+- There is no SMS code: it is weaker, and no SMS provider is built in.
+
 ## Health check
 
 `GET /health` answers `200` when the database is reachable and `503` when it is not. The image already has a Docker
