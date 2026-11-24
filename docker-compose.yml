@@ -42,6 +42,9 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       TRUST_PROXY: ${TRUST_PROXY:-0}
+      UPLOAD_MAX_BYTES: ${UPLOAD_MAX_BYTES:-5242880}
+    volumes:
+      - trot-uploads:/data/uploads   # uploaded rider documents: back this volume up with the database
 
   web:
     profiles: ["app"]
@@ -58,3 +61,4 @@ services:
 
 volumes:
   trot-data:
+  trot-uploads:

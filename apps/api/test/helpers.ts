@@ -6,6 +6,9 @@ import { hashPassword } from '../src/auth/password.ts';
 import { configureApp } from '../src/bootstrap.ts';
 import { APP_CONFIG } from '../src/config/env.ts';
 import type { AppConfig } from '../src/config/env.ts';
+import os from 'node:os';
+import path from 'node:path';
+import { rm } from 'node:fs/promises';
 
 // The tests run on their own database (created by `npm run db:test-setup`), never on the development data.
 function need(name: string): string {
@@ -17,6 +20,8 @@ if (need('TEST_DATABASE_URL') === process.env.DATABASE_URL) throw new Error('TES
 process.env.DATABASE_URL = need('TEST_DATABASE_URL');
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret-1234';
 process.env.JOBS_INTERVAL_SECONDS = '0'; // the tests run the background job by hand, never on a timer
+process.env.UPLOAD_DIR = path.join(os.tmpdir(), `trot-test-uploads-${process.pid}`); // uploaded files go to a throwaway folder
+process.env.UPLOAD_MAX_BYTES = '100000'; // small, so the size-limit test does not have to send megabytes
 process.env.RATE_LIMIT_KEY_PREFIX = `test-${process.pid}|`; // test files run side by side on one database: each keeps its own counters
 process.env.GENERAL_RATE_LIMIT = '10000000'; // the general-limit test lowers this for itself
 process.env.AUTH_RATE_LIMIT = '100000'; // the rate-limit test lowers this for itself
@@ -50,6 +55,7 @@ export async function startApp() {
 }
 export async function stopApp() {
   await ctx.app?.close();
+  await rm(process.env.UPLOAD_DIR as string, { recursive: true, force: true });
   await ctx.admin?.end();
 }
 

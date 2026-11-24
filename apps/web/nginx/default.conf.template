@@ -23,7 +23,7 @@ server {
     add_header Referrer-Policy "no-referrer" always;
     add_header Strict-Transport-Security "max-age=15552000; includeSubDomains" always;
     # Scripts, fonts and images only from this site. Styles may be inline because the screens set some layout values directly.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self' ${API_ORIGIN}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' ${API_ORIGIN}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'" always;
 
     # For a load balancer's health check.
     location = /healthz {

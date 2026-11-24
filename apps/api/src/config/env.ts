@@ -55,6 +55,10 @@ const RuntimeEnv = z.object({
 
   // How often the background job runs: it releases unpaid holds, passes on unanswered waitlist offers and expires old packages. 0 = off.
   JOBS_INTERVAL_SECONDS: int(0, 86_400, 60),
+
+  // Where uploaded rider documents are kept, and the largest file accepted. Use a folder that is backed up and survives a restart.
+  UPLOAD_DIR: text('./data/uploads'),
+  UPLOAD_MAX_BYTES: int(1_024, 26_214_400, 5_242_880),
 });
 
 export interface AppConfig {
@@ -73,6 +77,7 @@ export interface AppConfig {
   rateLimit: { authMax: number; generalMax: number; windowMs: number; keyPrefix: string };
   http: { corsOrigins: string[]; trustProxy: number; hstsMaxAgeSeconds: number };
   jobs: { intervalSeconds: number };
+  uploads: { dir: string; maxBytes: number };
 }
 
 function fail(what: string, error: z.ZodError): never {
@@ -104,6 +109,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       hstsMaxAgeSeconds: e.HSTS_MAX_AGE_SECONDS,
     },
     jobs: { intervalSeconds: e.JOBS_INTERVAL_SECONDS },
+    uploads: { dir: e.UPLOAD_DIR, maxBytes: e.UPLOAD_MAX_BYTES },
   };
 }
 

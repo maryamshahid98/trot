@@ -111,3 +111,15 @@ test('script settings: short seed and role passwords are refused', () => {
   assert.match(messageOf(() => loadAdminConfig('dev', { ...base, APP_DB_PASSWORD: 'short' } as NodeJS.ProcessEnv)), /APP_DB_PASSWORD/);
   assert.equal(loadAdminConfig('dev', { ...base, SEED_PASSWORD: '' } as NodeJS.ProcessEnv).seedPassword, undefined);
 });
+
+test('uploaded documents go to ./data/uploads with a 5 MB limit unless told otherwise, and bad limits stop the start', () => {
+  const c = loadConfig(withEnv());
+  assert.equal(c.uploads.dir, './data/uploads');
+  assert.equal(c.uploads.maxBytes, 5_242_880);
+  const custom = loadConfig(withEnv({ UPLOAD_DIR: '/data/uploads', UPLOAD_MAX_BYTES: '1048576' }));
+  assert.deepEqual(custom.uploads, { dir: '/data/uploads', maxBytes: 1_048_576 });
+  assert.match(messageOf(() => loadConfig(withEnv({ UPLOAD_MAX_BYTES: 'big' }))), /UPLOAD_MAX_BYTES/);
+  assert.match(messageOf(() => loadConfig(withEnv({ UPLOAD_MAX_BYTES: '0' }))), /UPLOAD_MAX_BYTES/);
+  assert.match(messageOf(() => loadConfig(withEnv({ UPLOAD_MAX_BYTES: '99999999999' }))), /UPLOAD_MAX_BYTES/);
+  assert.equal(loadConfig(withEnv({ UPLOAD_DIR: '', UPLOAD_MAX_BYTES: '' })).uploads.maxBytes, 5_242_880, 'blank means the default');
+});

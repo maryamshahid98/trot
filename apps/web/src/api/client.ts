@@ -50,6 +50,26 @@ export async function api<T>(method: string, path: string, body?: unknown): Prom
   return (res.status === 204 ? undefined : await res.json()) as T;
 }
 
+async function rawBinary(method: string, path: string, body?: Blob, headers: Record<string, string> = {}): Promise<Response> {
+  const h: Record<string, string> = { [CLIENT_HEADER.name]: CLIENT_HEADER.value, ...headers };
+  if (accessToken) h.Authorization = `Bearer ${accessToken}`;
+  return fetch(`${API_URL}${path}`, { method, headers: h, credentials: 'include', body });
+}
+async function binary(method: string, path: string, body?: Blob, headers?: Record<string, string>): Promise<Response> {
+  let res = await rawBinary(method, path, body, headers);
+  if (res.status === HTTP.UNAUTHORIZED && accessToken && (await refreshSession())) res = await rawBinary(method, path, body, headers);
+  if (res.status === HTTP.UNAUTHORIZED && accessToken) { setAccessToken(null); onSignedOut(); }
+  if (!res.ok) throw await toError(res);
+  return res;
+}
+/** Sends a file as the request body. The server checks what it really is, whatever the name or type says. */
+export const uploadFile = (path: string, file: File) => binary('PUT', path, file, { 'Content-Type': file.type, 'X-File-Name': encodeURIComponent(file.name) });
+/** Fetches a file the person is allowed to see. A plain link cannot do this, because the sign-in token is not a cookie. */
+export async function fetchFile(path: string): Promise<{ blob: Blob; type: string }> {
+  const res = await binary('GET', path);
+  const blob = await res.blob();
+  return { blob, type: blob.type };
+}
 export const get = <T,>(path: string) => api<T>('GET', path);
 export const post = <T,>(path: string, body?: unknown) => api<T>('POST', path, body ?? {});
 

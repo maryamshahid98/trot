@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { CurrentUser, Roles } from '../auth/decorators.ts';
 import type { AuthUser } from '../auth/decorators.ts';
 import { ROLE } from '../config/constants.ts';
+import type { ApiRequest } from '../common/http.ts';
 import { DocumentsService } from './documents.service.ts';
 import { RidersService } from './riders.service.ts';
 
@@ -56,6 +57,16 @@ export class RidersController {
 @Controller('documents')
 export class DocumentsController {
   constructor(@Inject(DocumentsService) private readonly docs: DocumentsService) {}
+
+  /** The file's bytes as the request body (Content-Type: application/pdf, image/jpeg or image/png). Optional header X-File-Name. */
+  @Put(':id/file') @Roles(...FAMILY_AND_STAFF)
+  attach(@Param('id') id: string, @Req() req: ApiRequest, @CurrentUser() user: AuthUser) {
+    return this.docs.attachFile(id, req.body, req.headers['content-type'], req.headers['x-file-name'] as string | undefined, user);
+  }
+
+  /** Downloads the file. Reception, managers, owners and the rider's own family only; every viewing is logged. */
+  @Get(':id/file') @Roles(...FAMILY_AND_STAFF)
+  file(@Param('id') id: string, @CurrentUser() user: AuthUser) { return this.docs.readFile(id, user); }
 
   @Post(':id/verify') @Roles(...STAFF)
   verify(@Param('id') id: string, @CurrentUser() user: AuthUser) { return this.docs.verify(id, user); }

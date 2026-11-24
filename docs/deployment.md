@@ -52,6 +52,22 @@ docker run --rm \
 - Migration `0009` adds a unique index that fails if two customers already share a rider profile. If it fails, the
   error names the duplicates; fix them by hand and run it again.
 
+## Rider documents (uploaded files)
+
+Scans and photos of medical forms, waivers and IDs are kept as files in `UPLOAD_DIR` (`/data/uploads` in the image). The database
+only keeps where each one is and a fingerprint of its contents.
+
+- **Mount a persistent volume at `/data/uploads`.** Without it the files are lost when the container is replaced.
+  `docker-compose.yml` already does this with the `trot-uploads` volume.
+- **Back the folder up together with the database**, at the same time. A database restored without its files leaves documents
+  that say "has a file" but cannot be opened (the API then answers 404 for those).
+- **Several API servers must share the folder** (a shared network disk). If that is not possible, keep one server or add an
+  object-storage implementation of `FileStorage` (`apps/api/src/riders/file-storage.ts`); nothing else has to change.
+- Only PDF, JPEG and PNG are accepted, judged from the file's own bytes, up to `UPLOAD_MAX_BYTES` (5 MB by default). A reverse
+  proxy in front must allow bodies at least that big (nginx's default of 1 MB would refuse them: set `client_max_body_size 6m;`).
+- Reception, managers, owners and the rider's own family can open a file. Every opening is recorded in the audit log.
+- **Files are not scanned for viruses.** If that matters to the club, scan on upload in front of the API.
+
 ## Health check
 
 `GET /health` answers `200` when the database is reachable and `503` when it is not. The image already has a Docker

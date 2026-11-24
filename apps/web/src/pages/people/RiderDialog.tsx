@@ -1,21 +1,38 @@
 import { useState } from 'react';
-import { api, post } from '../../api/client';
+import { api, fetchFile, post, uploadFile } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
 import { DOC_KINDS, FRONT_DESK, LEVELS, MANAGER_ROLES, PACKAGE_STATUSES_SETTABLE, PAYMENT_METHODS, RIDER_STATUSES, ROLE } from '../../constants';
 import type { Role } from '../../constants';
 import { useBranch } from '../../lib/branch';
 import { fmtDate, label, money, toMinor } from '../../lib/format';
+import { errorText } from '../../lib/useApi';
 import { qs, useQuery } from '../../lib/useApi';
 import type { PackageType, RiderDetail } from '../../lib/types';
 import { FormDialog } from '../../ui/FormDialog';
 import { Badge, Btn, Card, Confirm, Load, Modal, Table, Tabs, useAct } from '../../ui/kit';
 import { opts } from '../../ui/pickers';
 
-interface Doc { id: string; kind: string; status: string; signedAt: string | null; expiresAt: string | null; rejectedReason?: string | null }
+interface Doc { id: string; kind: string; status: string; signedAt: string | null; expiresAt: string | null; rejectedReason?: string | null; hasFile?: boolean; fileName?: string | null; fileType?: string | null; fileSize?: number | null }
+
+const MAX_FILE_BYTES = 5 * 1024 * 1024; // the server's default limit; the server is the one that enforces it
+const FILE_ACCEPT = '.pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png';
+const fileProblem = (f: File | null): string | null => (f && f.size > MAX_FILE_BYTES ? 'That file is over 5 MB. Choose a smaller scan or photo.' : null);
+
+/** A file picker for the form dialogs. The file is kept by the caller, so the dialog's own answers stay simple text. */
+function FilePick({ file, onPick }: { file: File | null; onPick: (f: File | null) => void }) {
+  const problem = fileProblem(file);
+  return (
+    <div className="field">
+      <label htmlFor="doc-file">Scan or photo (PDF, JPEG or PNG, up to 5 MB)</label>
+      <input id="doc-file" type="file" accept={FILE_ACCEPT} onChange={(e) => onPick(e.target.files?.[0] ?? null)} />
+      {problem && <span className="error" role="alert">{problem}</span>}
+    </div>
+  );
+}
 interface Guardian { accountId: string; fullName: string | null; email: string | null; phone: string | null }
 interface Pkg { id: string; status: string; name: string; balance: number; purchasedAt: string; validUntil: string; classFormats: string[] }
 interface Ledger { entries: { id: string; delta: number; reason: string; note: string | null; at: string }[]; balance: number }
-type Dlg = null | 'edit' | 'status' | 'level' | 'doc' | 'addGuardian' | 'sell' | { reject: Doc } | { removeG: Guardian } | { ledger: Pkg } | { adjust: Pkg } | { pstatus: Pkg };
+type Dlg = null | 'edit' | 'status' | 'level' | 'doc' | 'addGuardian' | 'sell' | { attach: Doc } | { view: { name: string; url: string | null } } | { reject: Doc } | { removeG: Guardian } | { ledger: Pkg } | { adjust: Pkg } | { pstatus: Pkg };
 
 export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; onClose: () => void; onChanged: () => void }) {
   const { user } = useAuth();
@@ -32,6 +49,19 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
   const docs = useQuery<{ documents: Doc[] }>(tab === 'documents' ? `/riders/${riderId}/documents` : null);
   const pkgs = useQuery<{ packages: Pkg[] }>(tab === 'packages' ? `/riders/${riderId}/packages` : null);
   const types = useQuery<{ packageTypes: PackageType[] }>(dlg === 'sell' && branchId ? `/package-types${qs({ branchId })}` : null);
+  const [pick, setPick] = useState<File | null>(null);
+  const openFile = (k: Doc) => void act(async () => {
+    const { blob, type } = await fetchFile(`/documents/${k.id}/file`);
+    const url = URL.createObjectURL(blob);
+    if (type.startsWith('image/')) setDlg({ view: { name: k.fileName ?? 'Document', url } });
+    else { // a PDF is saved to the device: a tab opened from here would have to obey this site's strict security rules
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = k.fileName ?? 'document.pdf';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }
+  });
   const reloadAll = () => { r.reload(); guardians.reload(); docs.reload(); pkgs.reload(); onChanged(); };
   const done = () => { setDlg(null); reloadAll(); };
   const d = r.data;
@@ -71,6 +101,7 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
           <Load q={docs}>{(x) => <Table rowKey={(k) => k.id} rows={x.documents} empty="No documents yet." cols={[
             { head: 'Document', cell: (k) => <b>{label(k.kind)}</b> }, { head: 'Status', cell: (k) => <Badge value={k.status} /> },
             { head: 'Signed', cell: (k) => (k.signedAt ? fmtDate(k.signedAt) : '') }, { head: 'Expires', cell: (k) => (k.expiresAt ? fmtDate(k.expiresAt) : '') },
+            { head: 'File', cell: (k) => (k.hasFile ? <Btn small onClick={() => openFile(k)}>{k.fileType === 'application/pdf' ? 'Download' : 'View'}</Btn> : <Btn small onClick={() => { setPick(null); setDlg({ attach: k }); }}>Attach file</Btn>) },
             { head: '', width: '1.6fr', right: true, cell: (k) => front && k.status === 'submitted' ? (
               <span className="actions"><Btn small kind="primary" onClick={() => void act(() => post(`/documents/${k.id}/verify`), 'Verified').then((ok) => ok && reloadAll())}>Verify</Btn><Btn small kind="danger" onClick={() => setDlg({ reject: k })}>Reject</Btn></span>
             ) : null },
@@ -102,7 +133,31 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
       {dlg === 'doc' && (
         <FormDialog title="Record a document" onClose={() => setDlg(null)} onDone={done}
           fields={[{ name: 'kind', label: 'Document', type: 'select', required: true, options: opts(DOC_KINDS) }, { name: 'signedAt', label: 'Signed on', type: 'date' }, { name: 'expiresAt', label: 'Expires on', type: 'date', hint: 'Medical forms expire. Leave blank if it does not.' }]}
-          onSubmit={(v) => post(`/riders/${riderId}/documents`, { kind: v.kind, ...(v.signedAt ? { signedAt: new Date(`${v.signedAt}T00:00:00Z`).toISOString() } : {}), ...(v.expiresAt ? { expiresAt: new Date(`${v.expiresAt}T00:00:00Z`).toISOString() } : {}) })} />
+          extra={<FilePick file={pick} onPick={setPick} />}
+          onSubmit={async (v) => {
+            const problem = fileProblem(pick);
+            if (problem) throw new Error(problem);
+            const made = await post<{ id: string }>(`/riders/${riderId}/documents`, { kind: v.kind, ...(v.signedAt ? { signedAt: new Date(`${v.signedAt}T00:00:00Z`).toISOString() } : {}), ...(v.expiresAt ? { expiresAt: new Date(`${v.expiresAt}T00:00:00Z`).toISOString() } : {}) });
+            if (pick) {
+              try { await uploadFile(`/documents/${made.id}/file`, pick); }
+              catch (e) { reloadAll(); throw new Error(`The document was recorded, but its file could not be attached: ${errorText(e)} Use "Attach file" on the document to try again.`, { cause: e }); }
+            }
+          }} />
+      )}
+      {typeof dlg === 'object' && dlg && 'attach' in dlg && (
+        <FormDialog title={`Attach a file: ${label(dlg.attach.kind)}`} submit="Attach" fields={[]} onClose={() => setDlg(null)} onDone={done}
+          extra={<FilePick file={pick} onPick={setPick} />}
+          onSubmit={async () => {
+            if (!pick) throw new Error('Choose a file first.');
+            const problem = fileProblem(pick);
+            if (problem) throw new Error(problem);
+            await uploadFile(`/documents/${dlg.attach.id}/file`, pick);
+          }} />
+      )}
+      {typeof dlg === 'object' && dlg && 'view' in dlg && (
+        <Modal title={dlg.view.name} onClose={() => { if (dlg.view.url) URL.revokeObjectURL(dlg.view.url); setDlg(null); }} wide>
+          {dlg.view.url && <img src={dlg.view.url} alt={dlg.view.name} style={{ maxWidth: '100%', borderRadius: 12 }} />}
+        </Modal>
       )}
       {typeof dlg === 'object' && dlg && 'reject' in dlg && <FormDialog title="Reject document" onClose={() => setDlg(null)} onDone={done} fields={[{ name: 'reason', label: 'Reason', type: 'text', required: true }]} onSubmit={(v) => post(`/documents/${dlg.reject.id}/reject`, { reason: v.reason })} />}
       {dlg === 'addGuardian' && <AddGuardian riderId={riderId} onClose={() => setDlg(null)} onDone={done} />}
