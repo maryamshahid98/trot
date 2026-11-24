@@ -7,6 +7,7 @@ import { dayKeyFor, epochMs } from '../common/sql.ts';
 import type { Row, Tx } from '../common/sql.ts';
 import { writeAudit } from '../common/audit.ts';
 import { queueForRider } from '../notifications/outbox.ts';
+import { ensureBookingInvoice } from '../payments/invoices.ts';
 import {
   AUDIT, BOOKING_STATUS, DOC_KIND, DOC_STATUS, ENTITY, LEDGER_REASON, OCCURRENCE_STATUS, PACKAGE_STATUS, PAY_WITH, PROBLEM, RIDE_FORMAT, WAITLIST_STATUS,
 } from '../config/constants.ts';
@@ -178,6 +179,8 @@ export async function insertBooking(
       [p.branchId, p.occurrenceId, p.riderId, p.status, p.payWith, p.payWith === PAY_WITH.PACKAGE ? p.packageId : null, p.source, p.userId, holdExpiresAt],
     )
   ).rows[0];
+  // Something to pay at the office: invoice it now. (A free class has nothing to invoice; a package booking was invoiced when the package was sold.)
+  if (p.status === BOOKING_STATUS.PENDING_OFFICE_PAYMENT) await ensureBookingInvoice(c, ins.id, p.userId);
   if (p.payWith === PAY_WITH.PACKAGE) {
     await c.query(`INSERT INTO package_ledger (rider_package_id, delta, reason, ref_key, booking_id, by_account) VALUES ($1,-1,$2,$3,$4,$5)`, [
       p.packageId, LEDGER_REASON.USE, `use:${ins.id}`, ins.id, p.userId,

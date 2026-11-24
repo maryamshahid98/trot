@@ -9,6 +9,7 @@ import {
 import { DbService } from '../db/db.service.ts';
 import type { Tx } from '../bookings/core.ts';
 import { AdjustPackage, CreatePackageType, IdParam, ListPackageTypes, SellPackage, SetPackageStatus, UpdatePackageType } from './payments.schemas.ts';
+import { issuePackageInvoice } from './invoices.ts';
 import { issueReceipt } from './receipts.ts';
 import { pgErrorCode } from '../common/errors.ts';
 
@@ -112,7 +113,7 @@ export class PackagesService {
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const rider = await this.rider(c, riderId, user, true);
       if (rider.status !== RIDER_STATUS.ACTIVE) throw new UnprocessableEntityException(problem('Only an approved rider can buy a package.', PAYMENT_PROBLEM.RIDER_NOT_ACTIVE));
-      const type = (await c.query(`SELECT id, branch_id AS "branchId", classes, price_minor AS "priceMinor", valid_days AS "validDays", active FROM package_types WHERE id = $1`, [b.packageTypeId])).rows[0];
+      const type = (await c.query(`SELECT id, name, branch_id AS "branchId", classes, price_minor AS "priceMinor", valid_days AS "validDays", active FROM package_types WHERE id = $1`, [b.packageTypeId])).rows[0];
       if (!type || !type.active || type.branchId !== rider.branchId) throw new UnprocessableEntityException(problem('That package is not on sale for this rider\'s branch.', PAYMENT_PROBLEM.PACKAGE_TYPE_UNAVAILABLE));
       // The desk types the amount it collected; it must match the price so a typo cannot create a wrong receipt.
       if (b.amountMinor !== undefined && b.amountMinor !== type.priceMinor) {
@@ -123,6 +124,7 @@ export class PackagesService {
       await c.query(`INSERT INTO package_ledger (rider_package_id, delta, reason, ref_key, by_account) VALUES ($1,$2,$3,$4,$5)`, [pk.id, type.classes, LEDGER_REASON.PURCHASE, `purchase:${pk.id}`, user.id]);
       // A free package has nothing to receipt.
       const receipt = type.priceMinor > 0 ? await issueReceipt(c, { branchId: rider.branchId, riderId, amountMinor: type.priceMinor, method: b.method, packageId: pk.id, userId: user.id }) : null;
+      if (receipt) await issuePackageInvoice(c, { branchId: rider.branchId, riderId, packageId: pk.id, description: `${type.name} (${type.classes} classes)`, grossMinor: type.priceMinor, receiptId: receipt.id, userId: user.id });
       await writeAudit(c, user, rider.branchId, AUDIT.PACKAGE_SELL, ENTITY.PACKAGE, pk.id, { riderId, packageTypeId: type.id, receipt: receipt?.number ?? null });
       return { id: pk.id as string, classes: type.classes as number, validUntil, receipt };
     });

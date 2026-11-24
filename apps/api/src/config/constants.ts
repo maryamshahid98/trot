@@ -46,7 +46,7 @@ export const PG_ERROR = {
 } as const;
 
 /** Audit log vocabulary. */
-export const ENTITY = { ACCOUNT: 'account', OCCURRENCE: 'occurrence', BOOKING: 'booking', WAITLIST_ENTRY: 'waitlist_entry', RIDER: 'rider', DOCUMENT: 'document', PACKAGE_TYPE: 'package_type', PACKAGE: 'package', RECEIPT: 'receipt', ADJUSTMENT: 'adjustment', HORSE: 'horse', ASSIGNMENT: 'horse_assignment', BRANCH: 'branch', INCIDENT: 'incident', ARENA: 'arena', ARENA_CLOSURE: 'arena_closure', STAFF_LEAVE: 'staff_leave', RIDE_TYPE: 'ride_type', NOTIFICATION: 'notification', SKILL: 'skill', ASSESSMENT: 'assessment' } as const;
+export const ENTITY = { ACCOUNT: 'account', OCCURRENCE: 'occurrence', BOOKING: 'booking', WAITLIST_ENTRY: 'waitlist_entry', RIDER: 'rider', DOCUMENT: 'document', PACKAGE_TYPE: 'package_type', PACKAGE: 'package', RECEIPT: 'receipt', ADJUSTMENT: 'adjustment', HORSE: 'horse', ASSIGNMENT: 'horse_assignment', BRANCH: 'branch', INCIDENT: 'incident', ARENA: 'arena', ARENA_CLOSURE: 'arena_closure', STAFF_LEAVE: 'staff_leave', RIDE_TYPE: 'ride_type', NOTIFICATION: 'notification', SKILL: 'skill', ASSESSMENT: 'assessment', INVOICE: 'invoice', CREDIT_NOTE: 'credit_note' } as const;
 export const AUDIT = {
   LOGIN: 'auth.login',
   LOGIN_FAILED: 'auth.login_failed',
@@ -55,6 +55,8 @@ export const AUDIT = {
   OCCURRENCE_CREATE: 'occurrence.create',
   SERIES_CREATE: 'series.create',
   NOTIFICATION_RETRY: 'notification.retry',
+  INVOICE_ISSUE: 'invoice.issue',
+  CREDIT_NOTE_ISSUE: 'credit_note.issue',
   SKILL_CREATE: 'skill.create',
   SKILL_UPDATE: 'skill.update',
   ASSESSMENT_CREATE: 'assessment.create',
@@ -309,6 +311,8 @@ export const ADJUSTMENT_KIND = { REFUND: 'refund', CREDIT: 'credit', WRITE_OFF: 
 /** Prices are shown VAT-inclusive; this is the share of a price that is VAT. Saudi standard rate. Confirm with the club's accountant. */
 export const VAT_PERCENT = 15;
 export const RECEIPT_PREFIX = 'R-';
+export const INVOICE_PREFIX = 'I-';
+export const CREDIT_NOTE_PREFIX = 'CN-';
 export const PAYMENT_PROBLEM = {
   PACKAGE_TYPE_UNAVAILABLE: 'PACKAGE_TYPE_UNAVAILABLE',
   RIDER_NOT_ACTIVE: 'RIDER_NOT_ACTIVE',

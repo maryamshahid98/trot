@@ -10,6 +10,7 @@ import type { PackageType, Receipt, RideType } from '../lib/types';
 import { FormDialog } from '../ui/FormDialog';
 import { Badge, Btn, Card, Load, Modal, PageHead, Table, Tabs } from '../ui/kit';
 import { opts } from '../ui/pickers';
+import { InvoicesTab } from './Invoices';
 
 interface Adj { id: string; kind: string; amountMinor: number; reason: string; status?: string; approved?: boolean; createdAt?: string }
 type F = null | 'newPkg' | 'newRide' | { editPkg: PackageType } | { editRide: RideType } | { receipt: Receipt };
@@ -18,7 +19,7 @@ export function Money() {
   const { user } = useAuth();
   const { branchId, branch, currency } = useBranch();
   const manager = MANAGER_ROLES.includes(user!.role as Role);
-  const [tab, setTab] = useState<'receipts' | 'packages' | 'rides' | 'unpaid'>('receipts');
+  const [tab, setTab] = useState<'receipts' | 'invoices' | 'packages' | 'rides' | 'unpaid'>('receipts');
   const [method, setMethod] = useState('');
   const [offset, setOffset] = useState(0);
   const [f, setF] = useState<F>(null);
@@ -42,13 +43,14 @@ export function Money() {
     <>
       <PageHead title="Money" sub={branch?.name} actions={manager && tab === 'packages' ? <Btn kind="primary" onClick={() => setF('newPkg')}>New package</Btn> : manager && tab === 'rides' ? <Btn kind="primary" onClick={() => setF('newRide')}>New ride type</Btn> : undefined} />
       <div className="page">
-        <Tabs tabs={[{ id: 'receipts', label: 'Receipts' }, { id: 'packages', label: 'Packages' }, { id: 'rides', label: 'Ride types' }, ...(manager ? [{ id: 'unpaid' as const, label: 'Unpaid' }] : [])]} value={tab} onChange={setTab} />
+        <Tabs tabs={[{ id: 'receipts', label: 'Receipts' }, { id: 'invoices', label: 'Invoices' }, { id: 'packages', label: 'Packages' }, { id: 'rides', label: 'Ride types' }, ...(manager ? [{ id: 'unpaid' as const, label: 'Unpaid' }] : [])]} value={tab} onChange={setTab} />
         {tab === 'receipts' && <Card flex>
           <div className="filters"><select aria-label="Method" value={method} onChange={(e) => { setMethod(e.target.value); setOffset(0); }}><option value="">Any method</option>{PAYMENT_METHODS.map((m) => <option key={m} value={m}>{label(m)}</option>)}</select></div>
           <Load q={receipts}>{(d) => <>
             <Table rowKey={(r) => r.id} rows={d.receipts} empty="No receipts." onRow={(r) => setF({ receipt: r })} cols={[{ head: 'Number', cell: (r) => <b>{r.number}</b> }, { head: 'Rider', cell: (r) => r.riderName }, { head: 'Amount', cell: (r) => money(r.amountMinor, currency) }, { head: 'VAT', cell: (r) => money(r.vatMinor, currency) }, { head: 'Method', cell: (r) => label(r.method) }, { head: 'Issued', cell: (r) => fmtDateTime(r.issuedAt) }]} />
             <div className="actions" style={{ paddingTop: 12 }}><Btn small disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 25))}>‹ Previous</Btn><span className="sub">{d.total === 0 ? 0 : offset + 1}–{Math.min(offset + 25, d.total)} of {d.total}</span><Btn small disabled={offset + 25 >= d.total} onClick={() => setOffset(offset + 25)}>Next ›</Btn></div>
           </>}</Load></Card>}
+        {tab === 'invoices' && <InvoicesTab />}
         {tab === 'packages' && <Card flex><Load q={pkgs}>{(d) => <Table rowKey={(p) => p.id} rows={d.packageTypes} empty="No packages." cols={[{ head: 'Package', cell: (p) => <b>{p.name}</b> }, { head: 'Classes', cell: (p) => p.classes }, { head: 'Price', cell: (p) => money(p.priceMinor, currency) }, { head: 'Valid days', cell: (p) => p.validDays }, { head: 'Covers', cell: (p) => p.classFormats.map(label).join(', ') }, { head: 'Status', cell: (p) => <Badge value={p.active ? 'active' : 'inactive'} /> }, { head: '', right: true, width: '0.8fr', cell: (p) => manager ? <Btn small onClick={() => setF({ editPkg: p })}>Edit</Btn> : null }]} />}</Load></Card>}
         {tab === 'rides' && <Card flex><Load q={rides}>{(d) => <Table rowKey={(p) => p.id} rows={d.rideTypes} empty="No ride types." cols={[{ head: 'Ride', cell: (p) => <b>{p.name}</b> }, { head: 'Price', cell: (p) => money(p.priceMinor, currency) }, { head: 'Minutes', cell: (p) => p.durationMinutes }, { head: 'Riders', cell: (p) => p.capacity }, { head: 'Level', cell: (p) => label(p.minLevel) }, { head: 'Min age', cell: (p) => p.minAgeYears ?? '' }, { head: 'Status', cell: (p) => <Badge value={p.active ? 'active' : 'inactive'} /> }, { head: '', right: true, width: '0.8fr', cell: (p) => manager ? <Btn small onClick={() => setF({ editRide: p })}>Edit</Btn> : null }]} />}</Load></Card>}
         {tab === 'unpaid' && <Card flex title="Riders let in without paying"><Load q={unpaid}>{(d) => <><p>Owed: <b>{money(d.owedMinor, currency)}</b></p><Table rowKey={(u) => u.bookingId} rows={d.unpaid} empty="Nobody owes anything." cols={[{ head: 'Rider', cell: (u) => <b>{u.riderName}</b> }, { head: 'Class or ride', cell: (u) => u.title }, { head: 'When', cell: (u) => fmtDateTime(u.startsAt) }, { head: 'Amount', cell: (u) => money(u.priceMinor, currency) }, { head: 'Reason', cell: (u) => u.reason ?? '' }]} /></>}</Load></Card>}

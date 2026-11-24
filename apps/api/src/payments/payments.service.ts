@@ -10,6 +10,7 @@ import { ADJUSTMENT_KIND, AUDIT, BOOKING_STATUS, ENTITY, PAYMENT_PROBLEM, ROLE }
 import { DbService } from '../db/db.service.ts';
 import { queueForRider } from '../notifications/outbox.ts';
 import { ConfirmUnpaid, CreateAdjustment, IdParam, ListReceipts, RecordPayment } from './payments.schemas.ts';
+import { ensureBookingInvoice, issueCreditNote, markInvoicePaid } from './invoices.ts';
 import { issueReceipt } from './receipts.ts';
 import type { Row, Tx } from '../common/sql.ts';
 
@@ -57,6 +58,10 @@ export class PaymentsService {
       // A free class has nothing to receipt.
       const receipt = price > 0 ? await issueReceipt(c, { branchId: booking.branchId, riderId: booking.riderId, amountMinor: price, method: b.method, bookingId: id, userId: user.id }) : null;
       await c.query(`UPDATE bookings SET status = $2, hold_expires_at = NULL WHERE id = $1`, [id, BOOKING_STATUS.CONFIRMED]);
+      if (receipt) {
+        const invoice = await ensureBookingInvoice(c, id, user.id);
+        if (invoice) await markInvoicePaid(c, invoice.id, receipt.id);
+      }
       await queueForRider(c, booking.riderId, {
         event: receipt ? 'payment.received' : 'booking.confirmed', branchId: booking.branchId, occurrenceId: booking.occurrenceId,
         dedupeKey: `booking:${id}:paid`, data: { receiptNumber: receipt?.number ?? null, amountMinor: price },
@@ -151,6 +156,8 @@ export class PaymentsService {
           [r.branchId, id, r.riderId, b.kind, b.amountMinor, b.reason, user.id, isManager ? user.id : null],
         )
       ).rows[0];
+      // A refund or a credit is also a credit note against the invoice that receipt paid.
+      if (b.kind === ADJUSTMENT_KIND.REFUND || b.kind === ADJUSTMENT_KIND.CREDIT) await issueCreditNote(c, { receiptId: id, adjustmentId: adj.id, amountMinor: b.amountMinor, reason: b.reason, userId: user.id });
       await writeAudit(c, user, r.branchId, AUDIT.ADJUSTMENT_CREATE, ENTITY.ADJUSTMENT, adj.id, { receiptId: id, kind: b.kind, amountMinor: b.amountMinor, reason: b.reason });
       return { id: adj.id as string, approved: isManager };
     });

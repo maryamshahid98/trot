@@ -221,3 +221,15 @@ select.chip { appearance: none; padding-inline-end: 16px; }
   .toast { max-width: none; }
 }
 .repeat-mark { opacity: 0.7; font-weight: 400; }
+
+/* ---------- printing an invoice or a statement ---------- */
+.doc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding-bottom: 8px; }
+.totals { max-width: 360px; margin-inline-start: auto; padding-top: 8px; }
+@media print {
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
+  .print-area { position: absolute; inset: 0; padding: 24px; background: #fff; color: #000; }
+  .no-print { display: none !important; }
+  .scrim { position: static; background: none; }
+  .modal { box-shadow: none; max-height: none; }
+}

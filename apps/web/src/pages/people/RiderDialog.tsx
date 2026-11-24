@@ -11,6 +11,7 @@ import type { PackageType, RiderDetail } from '../../lib/types';
 import { FormDialog } from '../../ui/FormDialog';
 import { Badge, Btn, Card, Confirm, Load, Modal, Table, Tabs, useAct } from '../../ui/kit';
 import { opts } from '../../ui/pickers';
+import { AccountPanel } from '../Invoices';
 
 interface Doc { id: string; kind: string; status: string; signedAt: string | null; expiresAt: string | null; rejectedReason?: string | null; hasFile?: boolean; fileName?: string | null; fileType?: string | null; fileSize?: number | null }
 
@@ -47,7 +48,7 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
   const front = FRONT_DESK.includes(role);
   const manager = MANAGER_ROLES.includes(role);
   const canLevel = role === ROLE.COACH || manager;
-  const [tab, setTab] = useState<'profile' | 'guardians' | 'documents' | 'packages' | 'progress'>('profile');
+  const [tab, setTab] = useState<'profile' | 'guardians' | 'documents' | 'packages' | 'account' | 'progress'>('profile');
   const [dlg, setDlg] = useState<Dlg>(null);
   const r = useQuery<RiderDetail>(`/riders/${riderId}`);
   const guardians = useQuery<{ guardians: Guardian[] }>(tab === 'guardians' && front ? `/riders/${riderId}/guardians` : null);
@@ -75,7 +76,7 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
   return (
     <Modal title={d?.fullName ?? 'Rider'} onClose={onClose} wide>
       <div className="actions" style={{ paddingBottom: 12 }}>
-        <Tabs tabs={[{ id: 'profile', label: 'Profile' }, ...(front ? [{ id: 'guardians' as const, label: 'Guardians' }] : []), { id: 'documents', label: 'Documents' }, { id: 'packages', label: 'Packages' }, { id: 'progress', label: 'Progress' }]} value={tab} onChange={setTab} />
+        <Tabs tabs={[{ id: 'profile', label: 'Profile' }, ...(front ? [{ id: 'guardians' as const, label: 'Guardians' }] : []), { id: 'documents', label: 'Documents' }, { id: 'packages', label: 'Packages' }, ...(front ? [{ id: 'account' as const, label: 'Account' }] : []), { id: 'progress', label: 'Progress' }]} value={tab} onChange={setTab} />
       </div>
 
       {tab === 'profile' && <Load q={r}>{(x) => (
@@ -115,6 +116,7 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
         </Card>
       )}
 
+      {tab === 'account' && front && <AccountPanel riderId={riderId} />}
       {tab === 'progress' && (
         <Card title="Level history and assessments">
           <Load q={progress}>{(x) => (
