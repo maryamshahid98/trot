@@ -1,0 +1,35 @@
+{
+  "name": "@trot/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "start": "tsx --env-file-if-exists=../../.env src/main.ts",
+    "dev": "tsx watch --env-file-if-exists=../../.env src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run db:test-setup && tsx --env-file-if-exists=../../.env --test test/*.test.ts",
+    "db:migrate": "tsx --env-file-if-exists=../../.env scripts/migrate.ts migrate",
+    "db:seed": "tsx --env-file-if-exists=../../.env scripts/migrate.ts seed",
+    "db:test-setup": "tsx --env-file-if-exists=../../.env scripts/migrate.ts test-setup"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.4.0",
+    "@nestjs/core": "^10.4.0",
+    "@nestjs/platform-express": "^10.4.0",
+    "@trot/domain": "*",
+    "jose": "^5.9.0",
+    "pg": "^8.13.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

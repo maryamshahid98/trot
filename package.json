@@ -1,0 +1,14 @@
+{
+  "name": "trot",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm --workspace @trot/domain test"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
+  }
+}
