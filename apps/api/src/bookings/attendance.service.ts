@@ -3,6 +3,7 @@ import { decideNoShow, MS } from '@trot/domain';
 import type { AuthUser } from '../auth/decorators.ts';
 import { loadPolicy } from '../common/policy.ts';
 import { writeAudit } from '../common/audit.ts';
+import { errorMessage } from '../common/errors.ts';
 import { epochMs } from '../common/sql.ts';
 import { parse } from '../common/validate.ts';
 import {
@@ -95,6 +96,41 @@ export class AttendanceService {
       await writeAudit(c, user, occRow.branchId, AUDIT.CLASS_COMPLETE, ENTITY.OCCURRENCE, id, { completed: done.rowCount, noShows: open.length });
       return { id, status: OCCURRENCE_STATUS.COMPLETED, completed: done.rowCount ?? 0, noShows: open.length };
     });
+  }
+
+  /**
+   * Cancels every date of a repeating class that has not started yet, each one exactly as a single class is cancelled
+   * (riders told it was the club's doing, package classes returned). A date that cannot be cancelled is reported, and the rest still are.
+   */
+  async cancelSeries(rawSeriesId: string, body: unknown, user: AuthUser) {
+    const { id } = parse(IdParam, { id: rawSeriesId });
+    parse(CancelClass, body); // check the reason before touching anything
+    const found = await this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+      const series = await c.query(`SELECT branch_id AS "branchId" FROM schedule_series WHERE id = $1`, [id]);
+      if (series.rowCount === 0) throw new NotFoundException('Series not found.');
+      const rows = (
+        await c.query(
+          `SELECT id FROM occurrences WHERE series_id = $1 AND status = ANY($2::occurrence_status[]) AND lower(during) > now() ORDER BY lower(during)`,
+          [id, [OCCURRENCE_STATUS.DRAFT, OCCURRENCE_STATUS.PUBLISHED]],
+        )
+      ).rows;
+      return { branchId: series.rows[0].branchId as string, rows };
+    });
+    const upcoming = found.rows;
+    const cancelled: string[] = [];
+    const failed: { id: string; message: string }[] = [];
+    for (const o of upcoming) {
+      try {
+        await this.cancelClass(o.id, body, user);
+        cancelled.push(o.id);
+      } catch (e: unknown) {
+        failed.push({ id: o.id, message: errorMessage(e) });
+      }
+    }
+    await this.db.scoped({ branchIds: user.branchIds, role: user.role }, (c) =>
+      writeAudit(c, user, found.branchId, AUDIT.SERIES_CANCEL, ENTITY.OCCURRENCE, id, { cancelled: cancelled.length, failed: failed.length }),
+    );
+    return { seriesId: id, cancelled: cancelled.length, failed };
   }
 
   /** Cancels a whole class. Every rider is told it was the club's doing, so nobody pays, and every package class comes back. */

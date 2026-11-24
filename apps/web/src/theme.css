@@ -220,3 +220,4 @@ select.chip { appearance: none; padding-inline-end: 16px; }
   .toasts { inset-inline: 12px; bottom: 12px; }
   .toast { max-width: none; }
 }
+.repeat-mark { opacity: 0.7; font-weight: 400; }

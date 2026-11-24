@@ -1,19 +1,34 @@
-import { post } from '../api/client';
+import { ApiError, post } from '../api/client';
 import { CLASS_FORMATS, LEVELS, OCCURRENCE_STATUS } from '../constants';
 import { useBranch } from '../lib/branch';
 import { useQuery, qs } from '../lib/useApi';
-import { toMinor, zonedToIso, money } from '../lib/format';
+import { fmtDateTime, toMinor, zonedToIso, money } from '../lib/format';
 import type { RideType } from '../lib/types';
 import { FormDialog } from '../ui/FormDialog';
 import type { FieldDef, Values } from '../ui/FormDialog';
+import { useToast } from '../ui/kit';
 import { opts, useArenas, useStaff } from '../ui/pickers';
 
 const STATUS_OPTIONS = [{ value: OCCURRENCE_STATUS.PUBLISHED, label: 'Published (customers can book)' }, { value: OCCURRENCE_STATUS.DRAFT, label: 'Draft (staff only)' }];
 const OVERRIDE: FieldDef = { name: 'overrideReason', label: 'Manager override reason', type: 'text', hint: 'Only fill this in to knowingly override a clash with another class, a closure or staff leave. Managers and owners only.' };
 const overrideOf = (v: Values) => (typeof v.overrideReason === 'string' && v.overrideReason.trim() ? { override: { reason: v.overrideReason.trim() } } : {});
 
+const REPEAT_OPTIONS = [{ value: '1', label: 'Every week' }, { value: '2', label: 'Every 2 weeks' }, { value: '3', label: 'Every 3 weeks' }, { value: '4', label: 'Every 4 weeks' }];
+const repeating = (v: Values) => typeof v.repeat === 'string' && v.repeat !== '';
+
+interface SeriesProblem { date?: string; reasons?: { message?: string }[] }
+interface SeriesResult { seriesId: string | null; created: unknown[]; skipped: { startsAt: string }[] }
+
+/** A refused series answers with the dates that failed and why; turn that into one readable message. */
+function seriesError(e: unknown): unknown {
+  if (!(e instanceof ApiError) || e.problems.length === 0) return e;
+  const lines = (e.problems as unknown as SeriesProblem[]).filter((p) => p.date).map((p) => `${fmtDateTime(p.date as string)}: ${(p.reasons ?? []).map((r) => r.message).filter(Boolean).join(', ') || 'clash'}`);
+  return lines.length ? new ApiError(e.status, `${e.message} ${lines.join(' · ')}`, []) : e;
+}
+
 export function NewClassDialog({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const { branchId } = useBranch();
+  const toast = useToast();
   const arenas = useArenas();
   const coaches = useStaff('coach');
   const fields: FieldDef[] = [
@@ -27,14 +42,24 @@ export function NewClassDialog({ onClose, onDone }: { onClose: () => void; onDon
     { name: 'capacity', label: 'Places', type: 'number', required: true, min: 1 },
     { name: 'price', label: 'Price (SAR, VAT included)', type: 'money', min: 0 },
     { name: 'status', label: 'Status', type: 'select', options: STATUS_OPTIONS },
+    { name: 'repeat', label: 'Repeat', type: 'select', options: REPEAT_OPTIONS, blank: 'Does not repeat', hint: 'Every date is checked like a single class, at the same clock time.' },
+    { name: 'repeatCount', label: 'Number of classes in the series', type: 'number', min: 2, max: 52, required: true, showIf: repeating, hint: 'Including the first one (2 to 52).' },
+    { name: 'skipConflicts', label: 'Skip dates that clash, instead of refusing the whole series', type: 'checkbox', showIf: repeating },
     OVERRIDE,
   ];
   return (
     <FormDialog title="New class" fields={fields} initial={{ minLevel: LEVELS[0], status: OCCURRENCE_STATUS.PUBLISHED, price: '0' }} submit="Check and save" onClose={onClose} onDone={onDone}
-      onSubmit={(v) => post('/schedule', {
-        branchId, title: v.title, arenaId: v.arenaId, coachId: v.coachId, format: v.format, minLevel: v.minLevel || LEVELS[0], status: v.status || OCCURRENCE_STATUS.PUBLISHED,
-        startsAt: zonedToIso(String(v.startsAt)), endsAt: zonedToIso(String(v.endsAt)), capacity: Number(v.capacity), priceMinor: toMinor(String(v.price || 0)), ...overrideOf(v),
-      })} />
+      onSubmit={async (v) => {
+        const one = {
+          branchId, title: v.title, arenaId: v.arenaId, coachId: v.coachId, format: v.format, minLevel: v.minLevel || LEVELS[0], status: v.status || OCCURRENCE_STATUS.PUBLISHED,
+          startsAt: zonedToIso(String(v.startsAt)), endsAt: zonedToIso(String(v.endsAt)), capacity: Number(v.capacity), priceMinor: toMinor(String(v.price || 0)), ...overrideOf(v),
+        };
+        if (!repeating(v)) return post('/schedule', one);
+        try {
+          const r = await post<SeriesResult>('/schedule/series', { ...one, repeat: { everyWeeks: Number(v.repeat), count: Number(v.repeatCount) }, skipConflicts: v.skipConflicts === true });
+          toast(r.skipped.length ? `${r.created.length} classes saved, ${r.skipped.length} skipped because they clash` : `${r.created.length} classes saved`);
+        } catch (e) { throw seriesError(e); }
+      }} />
   );
 }
 

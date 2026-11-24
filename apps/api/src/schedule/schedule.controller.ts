@@ -19,4 +19,11 @@ export class ScheduleController {
   create(@Body() body: unknown, @CurrentUser() user: AuthUser) {
     return this.svc.create(body, user);
   }
+
+  /** A class that repeats every 1 to 4 weeks. See ScheduleService.createSeries for the all-or-nothing, skip and check-only options. */
+  @Post('series')
+  @Roles(ROLE.RECEPTION, ROLE.MANAGER, ROLE.OWNER)
+  createSeries(@Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.createSeries(body, user);
+  }
 }

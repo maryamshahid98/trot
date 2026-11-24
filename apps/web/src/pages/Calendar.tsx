@@ -43,7 +43,7 @@ export function Calendar() {
                 <div className="day-h">{fmtDay(dayStartIso(d))}</div>
                 {byDay(d).map((o) => (
                   <button key={o.id} className={`ev${o.rideTypeId ? ' ride' : ''} ${o.status}`} onClick={() => setOpen(o)}>
-                    <b>{fmtTime(o.startsAt)} {o.title}</b>
+                    <b>{fmtTime(o.startsAt)} {o.title}{o.seriesId ? <span className="repeat-mark" role="img" aria-label="repeats" title="Part of a repeating series"> ↻</span> : null}</b>
                     <span>{o.arenaName} · {o.coachName}</span>
                     <span>{label(o.status)} · {places(o.capacity)}</span>
                   </button>
