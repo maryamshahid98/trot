@@ -72,7 +72,7 @@ export function safeFileName(raw: string | undefined, fallback: string, type: Al
   if (raw) {
     try { name = decodeURIComponent(raw); } catch { name = raw; }
   }
-  name = name.replace(/[\\/]/g, ' ').replace(/[^\p{L}\p{N} ._()-]/gu, '').replace(/\.{2,}/g, '.').replace(/\s+/g, ' ').replace(/^[\.\s]+/, '').trim();
+  name = name.replace(/[\\/]/g, ' ').replace(/[^\p{L}\p{N} ._()-]/gu, '').replace(/\.{2,}/g, '.').replace(/\s+/g, ' ').replace(/^[.\s]+/, '').trim();
   if (!name) name = fallback;
   const ext = `.${EXTENSION[type]}`;
   if (!name.toLowerCase().endsWith(ext)) name += ext;
