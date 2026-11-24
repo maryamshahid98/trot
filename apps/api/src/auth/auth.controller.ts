@@ -9,6 +9,7 @@ import { APP_CONFIG } from '../config/env.ts';
 import type { AppConfig } from '../config/env.ts';
 import { REFRESH_COOKIE } from '../config/constants.ts';
 import { clearRefreshCookie, isWebClient, readCookie, setRefreshCookie } from './web-session.ts';
+import type { ApiRequest, ApiResponse } from '../common/http.ts';
 
 @Controller('auth')
 export class AuthController {
@@ -18,7 +19,7 @@ export class AuthController {
   ) {}
 
   /** The website gets its refresh token as a cookie only; everyone else gets it in the body. */
-  private deliver<T extends { refreshToken?: string }>(req: any, res: any, result: T): Omit<T, 'refreshToken'> | T {
+  private deliver<T extends { refreshToken?: string }>(req: ApiRequest, res: ApiResponse, result: T): Omit<T, 'refreshToken'> | T {
     if (!isWebClient(req) || !result.refreshToken) return result;
     setRefreshCookie(res, result.refreshToken, this.config.auth.refreshTtlDays, this.config.auth.cookieSecure);
     const { refreshToken: _omit, ...rest } = result;
@@ -29,7 +30,7 @@ export class AuthController {
   @HttpCode(200)
   @Public()
   @UseGuards(RateLimitGuard)
-  async login(@Body() body: unknown, @Req() req: any, @Res({ passthrough: true }) res: any) {
+  async login(@Body() body: unknown, @Req() req: ApiRequest, @Res({ passthrough: true }) res: ApiResponse) {
     return this.deliver(req, res, await this.auth.login(parse(LoginBody, body), req.headers['user-agent']));
   }
 
@@ -37,7 +38,7 @@ export class AuthController {
   @HttpCode(200)
   @Public()
   @UseGuards(RateLimitGuard)
-  async refresh(@Body() body: unknown, @Req() req: any, @Res({ passthrough: true }) res: any) {
+  async refresh(@Body() body: unknown, @Req() req: ApiRequest, @Res({ passthrough: true }) res: ApiResponse) {
     const web = isWebClient(req);
     // A website request uses its cookie and nothing else, so a token pasted into the body can never be used from a page.
     const token = web ? readCookie(req, REFRESH_COOKIE.name) : parse(RefreshBody, body).refreshToken;
@@ -54,7 +55,7 @@ export class AuthController {
   @HttpCode(200)
   @Public()
   @UseGuards(RateLimitGuard)
-  async logout(@Body() body: unknown, @Req() req: any, @Res({ passthrough: true }) res: any) {
+  async logout(@Body() body: unknown, @Req() req: ApiRequest, @Res({ passthrough: true }) res: ApiResponse) {
     const web = isWebClient(req);
     const token = web ? readCookie(req, REFRESH_COOKIE.name) : parse(RefreshBody, body).refreshToken;
     if (web) clearRefreshCookie(res, this.config.auth.cookieSecure);

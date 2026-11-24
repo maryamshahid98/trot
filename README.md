@@ -35,7 +35,11 @@ Right now the backend is built and tested. The portal and the mobile apps are th
 
 ## Checks
 
-CI (`.github/workflows/ci.yml`) runs on every pull request: dependency audit, lint, typecheck, domain tests, API integration tests against Postgres, and the web build. Locally: `npm run lint`, `npm run typecheck`, `npm test` (domain), `npm run test:api` (needs the database from `docker compose up -d`).
+CI (`.github/workflows/ci.yml`) runs on every pull request: dependency audit, lint, typecheck, domain tests, API integration tests against Postgres, the web build and the API Docker image. Locally: `npm run lint`, `npm run typecheck`, `npm test` (domain), `npm run test:api` (needs the database from `docker compose up -d`).
+
+## Deploying
+
+The API has a Dockerfile. See [`docs/deployment.md`](docs/deployment.md) for the settings, the first-deployment steps and what is not covered.
 
 ## Getting started
 

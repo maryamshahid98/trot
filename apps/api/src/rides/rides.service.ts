@@ -9,6 +9,7 @@ import { DbService } from '../db/db.service.ts';
 import { ScheduleService } from '../schedule/schedule.service.ts';
 import type { PrepareRide } from '../schedule/schedule.service.ts';
 import { CreateRide, CreateRideType, IdParam, ListRideTypes, UpdateRideType } from './rides.schemas.ts';
+import { pgErrorCode } from '../common/errors.ts';
 
 const problem = (message: string, code: string, field?: string) => ({ message, problems: [{ code, ...(field ? { field } : {}), message }] });
 const COLUMNS = `id, branch_id AS "branchId", name, description, price_minor AS "priceMinor", duration_minutes AS "durationMinutes", capacity,
@@ -69,7 +70,7 @@ export class RidesService {
         await writeAudit(c, user, branchId, AUDIT.RIDE_TYPE_CREATE, ENTITY.RIDE_TYPE, id, { name: b.name, priceMinor: b.priceMinor, durationMinutes: b.durationMinutes, capacity: b.capacity });
         return { id };
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       throw this.dbError(e);
     }
   }
@@ -96,7 +97,7 @@ export class RidesService {
         await writeAudit(c, user, row.branchId, AUDIT.RIDE_TYPE_UPDATE, ENTITY.RIDE_TYPE, id, detail);
         return { id, changed, note: NOTE };
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       throw this.dbError(e);
     }
   }
@@ -154,9 +155,9 @@ export class RidesService {
     );
   }
 
-  private dbError(e: any) {
-    if (e?.code === PG_ERROR.UNIQUE_VIOLATION) return new ConflictException(problem('This branch already has a ride type with that name.', RIDE_PROBLEM.NAME_TAKEN, 'name'));
-    if (e?.code === PG_ERROR.INSUFFICIENT_PRIVILEGE) return new ForbiddenException('That is outside the branches you may work in.');
+  private dbError(e: unknown) {
+    if (pgErrorCode(e) === PG_ERROR.UNIQUE_VIOLATION) return new ConflictException(problem('This branch already has a ride type with that name.', RIDE_PROBLEM.NAME_TAKEN, 'name'));
+    if (pgErrorCode(e) === PG_ERROR.INSUFFICIENT_PRIVILEGE) return new ForbiddenException('That is outside the branches you may work in.');
     return e;
   }
 }

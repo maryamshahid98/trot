@@ -15,6 +15,8 @@ export default tseslint.config(
     },
   },
   { files: ['apps/api/**/*.ts', 'packages/**/*.ts', '*.mjs'], languageOptions: { globals: globals.node } },
+  // The API source is fully typed: a new `any` there fails the build. Tests and the web app keep it as a warning.
+  { files: ['apps/api/src/**/*.ts'], rules: { '@typescript-eslint/no-explicit-any': 'error' } },
   {
     files: ['apps/web/**/*.{ts,tsx}'],
     languageOptions: { globals: globals.browser },

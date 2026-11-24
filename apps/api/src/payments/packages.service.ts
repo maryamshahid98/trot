@@ -10,6 +10,7 @@ import { DbService } from '../db/db.service.ts';
 import type { Tx } from '../bookings/core.ts';
 import { AdjustPackage, CreatePackageType, IdParam, ListPackageTypes, SellPackage, SetPackageStatus, UpdatePackageType } from './payments.schemas.ts';
 import { issueReceipt } from './receipts.ts';
+import { pgErrorCode } from '../common/errors.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
 const TYPE_COLS = `pt.id, pt.name, pt.classes, pt.price_minor AS "priceMinor", pt.valid_days AS "validDays", pt.class_formats::text[] AS "classFormats", pt.active`;
@@ -46,7 +47,7 @@ export class PackagesService {
   /** Changes apply to future sales only. Packages already sold keep what the rider paid for. */
   async updateType(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    const b: Record<string, any> = parse(UpdatePackageType, body);
+    const b: Record<string, unknown> = parse(UpdatePackageType, body);
     const COLUMNS: Record<string, string> = { name: 'name', classes: 'classes', priceMinor: 'price_minor', validDays: 'valid_days', classFormats: 'class_formats', active: 'active' };
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const t = (await c.query(`SELECT id, branch_id AS "branchId" FROM package_types WHERE id = $1 FOR UPDATE`, [id])).rows[0];
@@ -89,7 +90,7 @@ export class PackagesService {
       ).rows[0];
       if (!pk) throw new NotFoundException('Package not found.');
       const entries = (await c.query(`SELECT id, delta, reason, note, booking_id AS "bookingId", at FROM package_ledger WHERE rider_package_id = $1 ORDER BY at, id`, [id])).rows;
-      return { entries, balance: entries.reduce((s: number, e: any) => s + e.delta, 0) };
+      return { entries, balance: entries.reduce((s: number, e) => s + e.delta, 0) };
     });
   }
 
@@ -144,8 +145,8 @@ export class PackagesService {
         const balance = (await c.query(`SELECT coalesce(sum(delta),0)::int AS n FROM package_ledger WHERE rider_package_id = $1`, [id])).rows[0].n;
         return { id, balance: balance as number };
       });
-    } catch (e: any) {
-      if (e?.code === PG_ERROR.CHECK_VIOLATION) throw new UnprocessableEntityException(problem('The balance cannot go below zero.', PAYMENT_PROBLEM.INSUFFICIENT_BALANCE));
+    } catch (e: unknown) {
+      if (pgErrorCode(e) === PG_ERROR.CHECK_VIOLATION) throw new UnprocessableEntityException(problem('The balance cannot go below zero.', PAYMENT_PROBLEM.INSUFFICIENT_BALANCE));
       throw e;
     }
   }

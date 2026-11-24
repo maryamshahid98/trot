@@ -8,6 +8,8 @@ import { DbService } from '../db/db.service.ts';
 import {
   AddGuardian, CreateRider, GuardianParams, IdParam, ListRiders, SetLevel, SetStatus, UpdateRiderCustomer, UpdateRiderStaff,
 } from './riders.schemas.ts';
+import { pgErrorCode } from '../common/errors.ts';
+import type { Tx } from '../common/sql.ts';
 
 const isCustomer = (u: AuthUser) => u.role === ROLE.CUSTOMER;
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
@@ -33,7 +35,7 @@ export class RidersService {
   constructor(@Inject(DbService) private readonly db: DbService) {}
 
   /** Finds one rider the caller may see. A customer only ever finds their own riders and wards; anything else looks like it does not exist. */
-  private async load(c: any, id: string, user: AuthUser, columns = DETAIL, lock = false) {
+  private async load(c: Tx, id: string, user: AuthUser, columns = DETAIL, lock = false) {
     const r = (
       await c.query(`SELECT ${columns} FROM riders r WHERE r.id = $1 AND ($2::boolean = false OR ${OWNS_RIDER('r', '$3')})${lock ? ' FOR UPDATE OF r' : ''}`, [id, isCustomer(user), user.id])
     ).rows[0];
@@ -87,9 +89,9 @@ export class RidersService {
         await writeAudit(c, user, branchId, AUDIT.RIDER_CREATE, ENTITY.RIDER, id, { status, relation: b.relation ?? null });
         return { id, status };
       });
-    } catch (e: any) {
-      if (e?.code === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException(problem('You already have a rider profile.', RIDER_PROBLEM.ALREADY_HAS_PROFILE));
-      if (e?.code === PG_ERROR.INSUFFICIENT_PRIVILEGE) throw new ForbiddenException('That is outside the branches you may work in.');
+    } catch (e: unknown) {
+      if (pgErrorCode(e) === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException(problem('You already have a rider profile.', RIDER_PROBLEM.ALREADY_HAS_PROFILE));
+      if (pgErrorCode(e) === PG_ERROR.INSUFFICIENT_PRIVILEGE) throw new ForbiddenException('That is outside the branches you may work in.');
       throw e;
     }
   }
@@ -115,7 +117,7 @@ export class RidersService {
           [branchId, q.q ? likePattern(q.q) : null, q.status ?? null, q.limit, q.offset],
         )
       ).rows;
-      return { total: rows[0]?.total ?? 0, riders: rows.map(({ total: _total, ...r }: any) => r) };
+      return { total: rows[0]?.total ?? 0, riders: rows.map(({ total: _total, ...r }) => r) };
     });
   }
 
@@ -126,7 +128,7 @@ export class RidersService {
 
   async update(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    const b: Record<string, any> = parse(isCustomer(user) ? UpdateRiderCustomer : UpdateRiderStaff, body);
+    const b: Record<string, unknown> = parse(isCustomer(user) ? UpdateRiderCustomer : UpdateRiderStaff, body);
     // Whitelist: only these keys ever become column names.
     const COLUMNS: Record<string, string> = { fullName: 'full_name', dateOfBirth: 'date_of_birth', medicalNotes: 'medical_notes', allergies: 'allergies', emergencyContact: 'emergency_contact' };
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
@@ -213,7 +215,7 @@ export class RidersService {
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const r = await this.load(c, id, user, `r.id, r.branch_id AS "branchId", to_char(r.date_of_birth, 'YYYY-MM-DD') AS dob`, true);
       const links = (await c.query(`SELECT guardian_account_id AS "accountId" FROM guardian_riders WHERE rider_id = $1 FOR UPDATE`, [id])).rows;
-      if (!links.some((l: any) => l.accountId === accountId)) throw new NotFoundException('That person is not a guardian of this rider.');
+      if (!links.some((l) => l.accountId === accountId)) throw new NotFoundException('That person is not a guardian of this rider.');
       // A child must always have someone responsible for them.
       if (links.length === 1 && ageOn(r.dob) < 18) throw new ConflictException(problem('A rider under 18 must keep at least one guardian.', RIDER_PROBLEM.LAST_GUARDIAN));
       await c.query(`DELETE FROM guardian_riders WHERE rider_id = $1 AND guardian_account_id = $2`, [id, accountId]);

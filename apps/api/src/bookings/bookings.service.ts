@@ -13,6 +13,7 @@ import { CancelBooking, CreateBooking, IdParam, RosterQuery } from './bookings.s
 import {
   evaluate, expireStaleHolds, insertBooking, LIVE, lockOccurrence, promoteWaitlist, returnPackageClass, toBooking, toOccurrence,
 } from './core.ts';
+import { pgErrorCode } from '../common/errors.ts';
 
 const isStaff = (u: AuthUser) => u.role === ROLE.RECEPTION || u.role === ROLE.MANAGER || u.role === ROLE.OWNER;
 export const cannotBook = (reasons: unknown[]) => new UnprocessableEntityException({ message: 'This booking cannot be made.', problems: reasons });
@@ -64,10 +65,10 @@ export class BookingsService {
         await writeAudit(c, user, occ.branchId, AUDIT.BOOKING_CREATE, ENTITY.BOOKING, ins.id, { occurrenceId: b.occurrenceId, riderId: b.riderId, payWith: b.payWith, status: placement });
         return { id: ins.id, status: placement, holdExpiresAt: ins.holdExpiresAt };
       });
-    } catch (e: any) {
-      if (e?.code === PG_ERROR.CHECK_VIOLATION) throw cannotBook([{ code: PROBLEM.NO_PACKAGE_BALANCE, message: 'No classes left in the package.' }]);
-      if (e?.code === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException('This rider already has a booking or a waitlist place for this class.');
-      if (e?.code === PG_ERROR.INSUFFICIENT_PRIVILEGE) throw new ForbiddenException('That is outside the branches you may work in.');
+    } catch (e: unknown) {
+      if (pgErrorCode(e) === PG_ERROR.CHECK_VIOLATION) throw cannotBook([{ code: PROBLEM.NO_PACKAGE_BALANCE, message: 'No classes left in the package.' }]);
+      if (pgErrorCode(e) === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException('This rider already has a booking or a waitlist place for this class.');
+      if (pgErrorCode(e) === PG_ERROR.INSUFFICIENT_PRIVILEGE) throw new ForbiddenException('That is outside the branches you may work in.');
       throw e;
     }
   }
@@ -104,7 +105,7 @@ export class BookingsService {
       await writeAudit(c, user, row.branchId, AUDIT.BOOKING_CANCEL, ENTITY.BOOKING, id, { cause, consumedClass: decision.consumesClass, returnedToPackage: decision.returnsPackageClass });
 
       // The freed place goes to the next person waiting.
-      const offers = await promoteWaitlist(c, { ...toOccurrence(occRow), branchId: occRow.branchId } as any, now, policy, user);
+      const offers = await promoteWaitlist(c, { ...toOccurrence(occRow), branchId: occRow.branchId }, now, policy, user);
       return { id, status: BOOKING_STATUS.CANCELLED, consumedClass: decision.consumesClass, returnedToPackage: decision.returnsPackageClass, reason: decision.reason, waitlistOffers: offers.length };
     });
   }

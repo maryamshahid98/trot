@@ -5,6 +5,7 @@ import { parse } from '../common/validate.ts';
 import { AUDIT, DOC_STATUS, ENTITY, RIDER_PROBLEM, RIDER_STATUS, ROLE } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
 import { IdParam, RejectDocument, SubmitDocument } from './riders.schemas.ts';
+import type { Tx } from '../common/sql.ts';
 
 const COLS = `d.id, d.rider_id AS "riderId", d.kind, d.status, d.file_ref AS "fileRef", d.signed_at AS "signedAt", d.expires_at AS "expiresAt", d.created_at AS "createdAt"`;
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
@@ -13,7 +14,7 @@ const problem = (message: string, code: string) => ({ message, problems: [{ code
 export class DocumentsService {
   constructor(@Inject(DbService) private readonly db: DbService) {}
 
-  private async rider(c: any, id: string, user: AuthUser) {
+  private async rider(c: Tx, id: string, user: AuthUser) {
     const r = (
       await c.query(`SELECT r.id, r.branch_id AS "branchId", r.status FROM riders r WHERE r.id = $1 AND ($2::boolean = false OR ${OWNS_RIDER('r', '$3')}) FOR UPDATE OF r`, [id, user.role === ROLE.CUSTOMER, user.id])
     ).rows[0];
@@ -55,7 +56,7 @@ export class DocumentsService {
   }
 
   /** Loads a submitted document and its rider's branch, locked, for a staff decision. */
-  private async pending(c: any, rawId: string) {
+  private async pending(c: Tx, rawId: string) {
     const { id } = parse(IdParam, { id: rawId });
     const d = (
       await c.query(

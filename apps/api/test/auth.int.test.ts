@@ -2,8 +2,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SignJWT } from 'jose';
-import { RateLimitGuard } from '../src/auth/rate-limit.guard.ts';
-import { api, appConfig, ctx, login, makeAccount, PASSWORD, startApp, stopApp, tokenFor } from './helpers.ts';
+import { api, appConfig, ctx, login, resetRateLimits, makeAccount, PASSWORD, startApp, stopApp, tokenFor } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -89,14 +88,45 @@ test('failures and sign-ins are written to the audit log', async () => {
 test('sign-in routes are rate limited per address', async () => {
   const original = appConfig().rateLimit.authMax;
   appConfig().rateLimit.authMax = 3;
-  RateLimitGuard.reset();
+  await resetRateLimits();
   try {
     const codes: number[] = [];
     for (let i = 0; i < 5; i++) codes.push((await login('nobody@trot-test.invalid')).status);
     assert.deepEqual(codes, [401, 401, 401, 429, 429]);
   } finally {
     appConfig().rateLimit.authMax = original;
-    RateLimitGuard.reset();
+    await resetRateLimits();
+  }
+});
+
+test('every route has a general per-address limit, and the health check is exempt', async () => {
+  const original = appConfig().rateLimit.generalMax;
+  appConfig().rateLimit.generalMax = 3;
+  await resetRateLimits();
+  try {
+    const codes: number[] = [];
+    for (let i = 0; i < 5; i++) codes.push((await api('GET', '/auth/me')).status);
+    assert.deepEqual(codes, [401, 401, 401, 429, 429]);
+    assert.equal((await api('GET', '/health')).status, 200, 'the load balancer must never be rate limited');
+  } finally {
+    appConfig().rateLimit.generalMax = original;
+    await resetRateLimits();
+  }
+});
+
+test('the limit is kept in the database, so a second server sees the same count', async () => {
+  const original = appConfig().rateLimit.authMax;
+  appConfig().rateLimit.authMax = 2;
+  await resetRateLimits();
+  try {
+    await login('nobody@trot-test.invalid');
+    await login('nobody@trot-test.invalid');
+    // Another API server would add to the same row. Simulate it by adding the third hit straight in the table.
+    await ctx.admin.query(`UPDATE rate_limits SET hits = hits + 1 WHERE key LIKE '%auth|%'`);
+    assert.equal((await login('nobody@trot-test.invalid')).status, 429);
+  } finally {
+    appConfig().rateLimit.authMax = original;
+    await resetRateLimits();
   }
 });
 
@@ -134,7 +164,10 @@ test('forged tokens are refused: wrong key, "alg none", expired, wrong audience,
   assert.equal((await api('GET', '/auth/me', { token: iss })).status, 401, 'wrong issuer');
   const notId = await new SignJWT({}).setProtectedHeader({ alg: 'HS256' }).setSubject(`1' OR '1'='1`).setIssuer('trot').setAudience('trot-api').setExpirationTime('10m').sign(secret());
   assert.equal((await api('GET', '/auth/me', { token: notId })).status, 401, 'subject is not an id');
-  const tampered = (await good().sign(secret())).replace(/.$/, (c) => (c === 'A' ? 'B' : 'A'));
+  // Change a character in the middle of the signature. The last character of a base64 value carries unused bits, so changing
+  // only that one can leave the decoded signature identical and the token still valid (a flaky test, 1 run in 16).
+  const [head, payload, sig] = (await good().sign(secret())).split('.');
+  const tampered = [head, payload, sig.slice(0, 10) + (sig[10] === 'A' ? 'B' : 'A') + sig.slice(11)].join('.');
   assert.equal((await api('GET', '/auth/me', { token: tampered })).status, 401, 'tampered signature');
 });
 

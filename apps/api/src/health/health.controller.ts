@@ -1,5 +1,6 @@
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { Public } from '../auth/decorators.ts';
+import { SkipRateLimit } from '../common/general-rate-limit.guard.ts';
 import { DbService } from '../db/db.service.ts';
 
 @Controller('health')
@@ -8,6 +9,7 @@ export class HealthController {
 
   @Get()
   @Public()
+  @SkipRateLimit()
   async check() {
     try {
       await this.db.query('SELECT 1');

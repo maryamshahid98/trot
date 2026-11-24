@@ -7,6 +7,7 @@ import { AUDIT, BOOKING_STATUS, ENTITY, LEDGER_REASON, LIMITS, OCCURRENCE_STATUS
 import { APP_CONFIG } from '../config/env.ts';
 import type { AppConfig } from '../config/env.ts';
 import { DbService } from '../db/db.service.ts';
+import { errorMessage } from '../common/errors.ts';
 
 export interface JobResult { branches: number; holdsReleased: number; offersPassedOn: number; packagesExpired: number }
 
@@ -41,11 +42,14 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     if (this.running) return; // the last run is still going
     this.running = true;
     try {
-      const all = (await this.db.query(`SELECT id::text FROM branches WHERE active`)).rows.map((r: any) => r.id as string);
-      const r = await this.run(all, Date.now());
-      if (r.holdsReleased + r.offersPassedOn + r.packagesExpired > 0) this.log.log(`Background job: ${JSON.stringify(r)}`);
-    } catch (e: any) {
-      this.log.error(`Background job failed: ${e?.message ?? e}`);
+      // With several API servers on one database, only one of them runs the clean-up at a time.
+      await this.db.withAdvisoryLock(LIMITS.jobAdvisoryLockKey, async () => {
+        const all = (await this.db.query(`SELECT id::text FROM branches WHERE active`)).rows.map((r) => r.id as string);
+        const r = await this.run(all, Date.now());
+        if (r.holdsReleased + r.offersPassedOn + r.packagesExpired > 0) this.log.log(`Background job: ${JSON.stringify(r)}`);
+      });
+    } catch (e: unknown) {
+      this.log.error(`Background job failed: ${errorMessage(e)}`);
     } finally {
       this.running = false;
     }
@@ -76,7 +80,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
           ORDER BY lower(o.during) LIMIT $6`,
         [branchId, [OCCURRENCE_STATUS.PUBLISHED, OCCURRENCE_STATUS.IN_PROGRESS], BOOKING_STATUS.PENDING_OFFICE_PAYMENT, WAITLIST_STATUS.OFFERED, iso, LIMITS.jobBatchSize],
       )
-    ).rows.map((r: any) => r.id);
+    ).rows.map((r) => r.id);
     let holds = 0;
     let offers = 0;
     const policy = await loadPolicy(c, branchId);
@@ -86,7 +90,7 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
       if (!row) continue;
       holds += await expireStaleHolds(c, id, branchId, now);
       const expiredBefore = Number((await c.query(`SELECT count(*) AS n FROM waitlist_entries WHERE occurrence_id = $1 AND status = $2`, [id, WAITLIST_STATUS.EXPIRED])).rows[0].n);
-      await promoteWaitlist(c, { ...toOccurrence(row), branchId } as any, now, policy, null);
+      await promoteWaitlist(c, { ...toOccurrence(row), branchId }, now, policy, null);
       offers += Number((await c.query(`SELECT count(*) AS n FROM waitlist_entries WHERE occurrence_id = $1 AND status = $2`, [id, WAITLIST_STATUS.EXPIRED])).rows[0].n) - expiredBefore;
     }
     return { holds, offers };

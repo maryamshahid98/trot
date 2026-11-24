@@ -171,7 +171,8 @@ export const LIMITS = {
   reasonMax: 500,
   searchMax: 100,
   earliestBirthYear: 1900,
-  rateLimitCleanupThreshold: 10_000, // sweep expired rate-limit entries once the table is this big
+  jobAdvisoryLockKey: 7_301_001, // any fixed number; every API server uses the same one so only one runs the background job at a time
+  rateLimitSweepChance: 0.01, // on about 1 in 100 rate-limited requests, delete the counters whose window has ended
 } as const;
 
 /** The test database is dropped and rebuilt on every run, so only a database whose name ends like this may be used for it. */

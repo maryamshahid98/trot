@@ -20,7 +20,7 @@ export class AuthService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  private async audit(c: { query(text: string, params?: any[]): Promise<unknown> }, accountId: string, action: string, detail: object = {}) {
+  private async audit(c: { query(text: string, params?: unknown[]): Promise<unknown> }, accountId: string, action: string, detail: object = {}) {
     // accountId is sent twice: Postgres cannot give one placeholder two types (uuid for the actor, text for entity_id).
     await c.query(`INSERT INTO audit_log (actor_account_id, action, entity, entity_id, detail) VALUES ($1,$2,$3,$4,$5)`, [
       accountId, action, ENTITY.ACCOUNT, accountId, JSON.stringify(detail),
@@ -71,7 +71,7 @@ export class AuthService {
         accessToken: await this.tokens.signAccess(a.id),
         refreshToken,
         expiresIn: accessTtlSeconds,
-        user: { id: a.id, role: a.role, fullName: a.full_name, locale: a.locale, theme: a.theme, branchIds: branches.rows.map((b: any) => b.id) },
+        user: { id: a.id, role: a.role, fullName: a.full_name, locale: a.locale, theme: a.theme, branchIds: branches.rows.map((b) => b.id) },
       };
     });
   }

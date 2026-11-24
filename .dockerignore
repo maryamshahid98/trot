@@ -1,0 +1,14 @@
+# Keep the build context small and keep secrets out of every image layer.
+.git
+.github
+.idea
+**/node_modules
+**/dist
+.env
+.env.*
+!.env.example
+apps/web/*
+!apps/web/package.json
+apps/api/test
+docs
+*.md

@@ -1,15 +1,47 @@
+# Development: `docker compose up -d` starts only the database (the API runs on your machine with `npm start`).
+# Full stack in containers: `docker compose --profile app up --build -d`  (needs JWT_SECRET and APP_DB_PASSWORD in .env).
+# Production: see docs/deployment.md. The values below are DEVELOPMENT defaults and must not be used as they are.
 services:
   db:
     image: postgres:16
     container_name: trot-db
     environment:
       POSTGRES_USER: trot          # superuser, used only by the migration runner
-      POSTGRES_PASSWORD: trot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trot}
       POSTGRES_DB: trot
     ports:
-      - "5432:5432"
+      - "5432:5432"                # development only: in production do not publish the database port
     volumes:
       - trot-data:/var/lib/postgresql/data
-    # The database starts EMPTY. Create the tables with: npm run db:migrate (in apps/api).
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trot -d trot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # The database starts EMPTY. Create the tables with: npm run db:migrate (in apps/api), or see docs/deployment.md.
+
+  api:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    init: true                     # forwards stop signals, so the API shuts down cleanly
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://trot_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}@db:5432/trot
+      # Used only by the one-off migration command, never by the running API.
+      ADMIN_DATABASE_URL: postgres://trot:${POSTGRES_PASSWORD:-trot}@db:5432/trot
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-0}
+
 volumes:
   trot-data:

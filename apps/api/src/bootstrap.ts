@@ -3,6 +3,7 @@ import type { CorsOptionsDelegate } from '@nestjs/common/interfaces/external/cor
 import { CONTENT_SECURITY_POLICY, CORS_HEADERS, CORS_METHODS } from './config/constants.ts';
 import { APP_CONFIG } from './config/env.ts';
 import type { AppConfig } from './config/env.ts';
+import type { ApiRequest, ApiResponse } from './common/http.ts';
 
 /** Settings shared by the real server and the tests, so tests exercise the same security setup. */
 export function configureApp(app: INestApplication) {
@@ -11,7 +12,7 @@ export function configureApp(app: INestApplication) {
   http.disable('x-powered-by');
   if (config.http.trustProxy > 0) http.set('trust proxy', config.http.trustProxy); // number of proxies in front
 
-  app.use((_req: any, res: any, next: () => void) => {
+  app.use((_req: ApiRequest, res: ApiResponse, next: () => void) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'DENY');
     res.setHeader('Referrer-Policy', 'no-referrer');

@@ -3,6 +3,7 @@ import type { AuthUser } from '../auth/decorators.ts';
 import { writeAudit } from '../common/audit.ts';
 import { branchFor } from '../common/branch.ts';
 import { epochMs } from '../common/sql.ts';
+import type { Row } from '../common/sql.ts';
 import { parse } from '../common/validate.ts';
 import { AUDIT, ENTITY, INCIDENT_PROBLEM, INCIDENT_SEVERITY, INCIDENT_STATUS, INCIDENT_TRANSITIONS, LIMITS, ROLE } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
@@ -13,7 +14,7 @@ const isBoss = (u: AuthUser) => u.role === ROLE.MANAGER || u.role === ROLE.OWNER
 const COLS = `i.id, i.branch_id AS "branchId", i.severity, i.status, i.kind, i.rider_id AS "riderId", r.full_name AS "riderName", i.horse_id AS "horseId", h.name AS "horseName",
   i.description, i.reported_by AS "reportedBy", rep.full_name AS "reportedByName", ${epochMs('i.occurred_at')} AS "occurredAt", ${epochMs('i.created_at')} AS "createdAt"`;
 const FROM = `FROM incidents i LEFT JOIN riders r ON r.id = i.rider_id LEFT JOIN horses h ON h.id = i.horse_id LEFT JOIN accounts rep ON rep.id = i.reported_by`;
-const view = (x: any) => ({ ...x, occurredAt: Number(x.occurredAt), createdAt: Number(x.createdAt) });
+const view = <T extends Row>(x: T) => ({ ...x, occurredAt: Number(x.occurredAt), createdAt: Number(x.createdAt) });
 
 /**
  * Incident reports hold what happened, so they may mention a rider's injury. Staff see only what they reported themselves;
@@ -73,7 +74,7 @@ export class IncidentsService {
         [ENTITY.INCIDENT, incident.id],
       )
     ).rows;
-    return { history: rows.map((r: any) => ({ ...r, at: Number(r.at) })) };
+    return { history: rows.map((r) => ({ ...r, at: Number(r.at) })) };
   }
 
   async setStatus(rawId: string, body: unknown, user: AuthUser) {

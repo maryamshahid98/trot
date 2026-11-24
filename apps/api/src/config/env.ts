@@ -44,7 +44,9 @@ const RuntimeEnv = z.object({
   MAX_FAILED_LOGINS: int(1, 100, 5),
   LOCKOUT_MINUTES: int(1, 1_440, 15),
   AUTH_RATE_LIMIT: int(1, 100_000, 20), // sign-in requests allowed per address per window
+  GENERAL_RATE_LIMIT: int(1, 10_000_000, 600), // requests allowed per address per window, across all routes
   RATE_LIMIT_WINDOW_SECONDS: int(1, 3_600, 60),
+  RATE_LIMIT_KEY_PREFIX: z.preprocess(blankIsUnset, z.string().max(64).default('')), // keeps counters apart when environments share one database
 
   // Websites allowed to call the API from a browser, comma separated. Empty = no browser site is allowed.
   CORS_ORIGINS: z.preprocess(blankIsUnset, z.string().default('')),
@@ -68,7 +70,7 @@ export interface AppConfig {
     maxFailedLogins: number;
     lockoutMinutes: number;
   };
-  rateLimit: { authMax: number; windowMs: number };
+  rateLimit: { authMax: number; generalMax: number; windowMs: number; keyPrefix: string };
   http: { corsOrigins: string[]; trustProxy: number; hstsMaxAgeSeconds: number };
   jobs: { intervalSeconds: number };
 }
@@ -95,7 +97,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       maxFailedLogins: e.MAX_FAILED_LOGINS,
       lockoutMinutes: e.LOCKOUT_MINUTES,
     },
-    rateLimit: { authMax: e.AUTH_RATE_LIMIT, windowMs: e.RATE_LIMIT_WINDOW_SECONDS * 1_000 },
+    rateLimit: { authMax: e.AUTH_RATE_LIMIT, generalMax: e.GENERAL_RATE_LIMIT, windowMs: e.RATE_LIMIT_WINDOW_SECONDS * 1_000, keyPrefix: e.RATE_LIMIT_KEY_PREFIX },
     http: {
       corsOrigins: e.CORS_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean),
       trustProxy: e.TRUST_PROXY,

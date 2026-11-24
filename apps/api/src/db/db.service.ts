@@ -29,7 +29,7 @@ export class DbService implements OnModuleDestroy {
   }
 
   /** Unscoped query. Branch-owned tables return NO rows here by design. Fine for accounts and sign-in tables. */
-  query<T extends pg.QueryResultRow = any>(text: string, params: unknown[] = []) {
+  query<T extends pg.QueryResultRow = pg.QueryResultRow>(text: string, params: unknown[] = []) {
     return this.pool.query<T>(text, params);
   }
 
@@ -79,6 +79,26 @@ export class DbService implements OnModuleDestroy {
   async withAccountBranches<T>(c: pg.PoolClient, accountId: string, fn: () => Promise<T>): Promise<T> {
     const rows = (await c.query(`SELECT branch_id::text AS id FROM account_branches WHERE account_id = $1`, [accountId])).rows;
     return this.withBranches(c, rows.map((r) => r.id as string), fn);
+  }
+
+  /**
+   * Runs fn only if no other server is already holding this lock (a Postgres advisory lock, shared by every API instance
+   * that uses the same database). Returns undefined, without running fn, when someone else holds it.
+   * The lock belongs to one connection and is released when fn ends, or if this server dies.
+   */
+  async withAdvisoryLock<T>(key: number, fn: () => Promise<T>): Promise<T | undefined> {
+    const c = await this.pool.connect();
+    try {
+      const got = (await c.query('SELECT pg_try_advisory_lock($1) AS ok', [key])).rows[0].ok as boolean;
+      if (!got) return undefined;
+      try {
+        return await fn();
+      } finally {
+        await c.query('SELECT pg_advisory_unlock($1)', [key]);
+      }
+    } finally {
+      c.release();
+    }
   }
 
   async onModuleDestroy() {

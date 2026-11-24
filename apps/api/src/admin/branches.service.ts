@@ -29,7 +29,7 @@ export class BranchesService {
 
   async update(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    const b: Record<string, any> = parse(UpdateBranch, body);
+    const b: Record<string, unknown> = parse(UpdateBranch, body);
     await this.db.tx(async (c) => {
       const row = (await c.query(`SELECT name, time_zone FROM branches WHERE id = $1 AND id = ANY($2::uuid[]) FOR UPDATE`, [id, user.branchIds])).rows[0];
       if (!row) throw new NotFoundException(problem('Branch not found.', ADMIN_PROBLEM.BRANCH_NOT_FOUND));
