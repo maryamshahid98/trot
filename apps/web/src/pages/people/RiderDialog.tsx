@@ -29,6 +29,11 @@ function FilePick({ file, onPick }: { file: File | null; onPick: (f: File | null
     </div>
   );
 }
+interface Progress {
+  level: string; ratingMax: number;
+  history: { fromLevel: string | null; toLevel: string; reason: string; changedAt: string; changedBy: string | null }[];
+  assessments: { id: string; fromLevel: string; targetLevel: string; status: string; decidedAt: string | null; ratings: { skillName: string; rating: number }[] }[];
+}
 interface Guardian { accountId: string; fullName: string | null; email: string | null; phone: string | null }
 interface Pkg { id: string; status: string; name: string; balance: number; purchasedAt: string; validUntil: string; classFormats: string[] }
 interface Ledger { entries: { id: string; delta: number; reason: string; note: string | null; at: string }[]; balance: number }
@@ -42,12 +47,13 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
   const front = FRONT_DESK.includes(role);
   const manager = MANAGER_ROLES.includes(role);
   const canLevel = role === ROLE.COACH || manager;
-  const [tab, setTab] = useState<'profile' | 'guardians' | 'documents' | 'packages'>('profile');
+  const [tab, setTab] = useState<'profile' | 'guardians' | 'documents' | 'packages' | 'progress'>('profile');
   const [dlg, setDlg] = useState<Dlg>(null);
   const r = useQuery<RiderDetail>(`/riders/${riderId}`);
   const guardians = useQuery<{ guardians: Guardian[] }>(tab === 'guardians' && front ? `/riders/${riderId}/guardians` : null);
   const docs = useQuery<{ documents: Doc[] }>(tab === 'documents' ? `/riders/${riderId}/documents` : null);
   const pkgs = useQuery<{ packages: Pkg[] }>(tab === 'packages' ? `/riders/${riderId}/packages` : null);
+  const progress = useQuery<Progress>(tab === 'progress' ? `/riders/${riderId}/progress` : null);
   const types = useQuery<{ packageTypes: PackageType[] }>(dlg === 'sell' && branchId ? `/package-types${qs({ branchId })}` : null);
   const [pick, setPick] = useState<File | null>(null);
   const openFile = (k: Doc) => void act(async () => {
@@ -69,7 +75,7 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
   return (
     <Modal title={d?.fullName ?? 'Rider'} onClose={onClose} wide>
       <div className="actions" style={{ paddingBottom: 12 }}>
-        <Tabs tabs={[{ id: 'profile', label: 'Profile' }, ...(front ? [{ id: 'guardians' as const, label: 'Guardians' }] : []), { id: 'documents', label: 'Documents' }, { id: 'packages', label: 'Packages' }]} value={tab} onChange={setTab} />
+        <Tabs tabs={[{ id: 'profile', label: 'Profile' }, ...(front ? [{ id: 'guardians' as const, label: 'Guardians' }] : []), { id: 'documents', label: 'Documents' }, { id: 'packages', label: 'Packages' }, { id: 'progress', label: 'Progress' }]} value={tab} onChange={setTab} />
       </div>
 
       {tab === 'profile' && <Load q={r}>{(x) => (
@@ -109,7 +115,28 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
         </Card>
       )}
 
-      {tab === 'packages' && (
+      {tab === 'progress' && (
+        <Card title="Level history and assessments">
+          <Load q={progress}>{(x) => (
+            <>
+              <p>Current level: <Badge value={x.level} /></p>
+              <Table rowKey={(h) => `${h.changedAt}${h.toLevel}`} rows={x.history} empty="No changes yet." cols={[
+                { head: 'When', cell: (h) => fmtDate(h.changedAt) },
+                { head: 'Change', cell: (h) => (h.fromLevel ? `${label(h.fromLevel)} → ${label(h.toLevel)}` : `Started at ${label(h.toLevel)}`) },
+                { head: 'Why', cell: (h) => label(h.reason) },
+                { head: 'By', cell: (h) => h.changedBy ?? '' },
+              ]} />
+              <h3 className="card-title" style={{ padding: '16px 0 4px' }}>Assessments</h3>
+              <Table rowKey={(a) => a.id} rows={x.assessments} empty="No assessments yet." cols={[
+                { head: 'Date', cell: (a) => (a.decidedAt ? fmtDate(a.decidedAt) : '') },
+                { head: 'Level', cell: (a) => `${label(a.fromLevel)} → ${label(a.targetLevel)}` },
+                { head: 'Result', cell: (a) => <Badge value={a.status} /> },
+                { head: 'Skills', width: '2fr', cell: (a) => (a.ratings.length ? a.ratings.map((s) => `${s.skillName} ${s.rating}/${x.ratingMax}`).join(' · ') : '') },
+              ]} />
+            </>
+          )}</Load>
+        </Card>
+      )}      {tab === 'packages' && (
         <Card title="Class packages" actions={front ? <Btn small kind="primary" onClick={() => setDlg('sell')}>Sell package</Btn> : undefined}>
           <Load q={pkgs}>{(x) => <Table rowKey={(k) => k.id} rows={x.packages} empty="No packages." cols={[
             { head: 'Package', cell: (k) => <b>{k.name}</b>, width: '1.4fr' }, { head: 'Left', cell: (k) => k.balance, width: '0.5fr' }, { head: 'Status', cell: (k) => <Badge value={k.status} /> },

@@ -46,7 +46,7 @@ export const PG_ERROR = {
 } as const;
 
 /** Audit log vocabulary. */
-export const ENTITY = { ACCOUNT: 'account', OCCURRENCE: 'occurrence', BOOKING: 'booking', WAITLIST_ENTRY: 'waitlist_entry', RIDER: 'rider', DOCUMENT: 'document', PACKAGE_TYPE: 'package_type', PACKAGE: 'package', RECEIPT: 'receipt', ADJUSTMENT: 'adjustment', HORSE: 'horse', ASSIGNMENT: 'horse_assignment', BRANCH: 'branch', INCIDENT: 'incident', ARENA: 'arena', ARENA_CLOSURE: 'arena_closure', STAFF_LEAVE: 'staff_leave', RIDE_TYPE: 'ride_type', NOTIFICATION: 'notification' } as const;
+export const ENTITY = { ACCOUNT: 'account', OCCURRENCE: 'occurrence', BOOKING: 'booking', WAITLIST_ENTRY: 'waitlist_entry', RIDER: 'rider', DOCUMENT: 'document', PACKAGE_TYPE: 'package_type', PACKAGE: 'package', RECEIPT: 'receipt', ADJUSTMENT: 'adjustment', HORSE: 'horse', ASSIGNMENT: 'horse_assignment', BRANCH: 'branch', INCIDENT: 'incident', ARENA: 'arena', ARENA_CLOSURE: 'arena_closure', STAFF_LEAVE: 'staff_leave', RIDE_TYPE: 'ride_type', NOTIFICATION: 'notification', SKILL: 'skill', ASSESSMENT: 'assessment' } as const;
 export const AUDIT = {
   LOGIN: 'auth.login',
   LOGIN_FAILED: 'auth.login_failed',
@@ -55,6 +55,11 @@ export const AUDIT = {
   OCCURRENCE_CREATE: 'occurrence.create',
   SERIES_CREATE: 'series.create',
   NOTIFICATION_RETRY: 'notification.retry',
+  SKILL_CREATE: 'skill.create',
+  SKILL_UPDATE: 'skill.update',
+  ASSESSMENT_CREATE: 'assessment.create',
+  ASSESSMENT_SUBMIT: 'assessment.submit',
+  ASSESSMENT_DECIDE: 'assessment.decide',
   DOCUMENT_FILE_ATTACH: 'document.file_attach',
   DOCUMENT_FILE_VIEW: 'document.file_view',
   SERIES_CANCEL: 'series.cancel',
@@ -175,6 +180,7 @@ export const LIMITS = {
   notesMax: 2000,
   fileRefMax: 500,
   uploadFileNameMax: 120,
+  ratingMax: 5, // a skill is rated 1 to 5
   notificationBatch: 50, // messages sent per branch per run of the sender
   notificationLeaseMinutes: 5, // a message claimed by a sender that then died is picked up again after this long
   notificationMaxAttempts: 5,

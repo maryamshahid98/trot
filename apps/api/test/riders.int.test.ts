@@ -249,16 +249,24 @@ describe('level and status', () => {
     return r.body.id as string;
   }
 
-  test('level: coach, manager and owner only, and the value must be a real level', async () => {
+  test('level correction: managers and owners only (a coach assesses instead), with a reason, a real level, and a kept history', async () => {
     const id = await pendingRider();
-    assert.equal((await post(`/riders/${id}/level`, (await person('customer')).token, { level: 'advanced' })).status, 403);
-    assert.equal((await post(`/riders/${id}/level`, (await person('reception')).token, { level: 'advanced' })).status, 403);
-    assert.equal((await post(`/riders/${id}/level`, undefined, { level: 'advanced' })).status, 401);
-    const coach = await person('coach');
-    assert.equal((await post(`/riders/${id}/level`, coach.token, { level: 'expert' })).status, 400);
-    assert.equal((await post(`/riders/${id}/level`, coach.token, { level: 'intermediate' })).status, 201);
+    const fix = { level: 'advanced', reason: 'Entered wrongly at sign-up' };
+    assert.equal((await post(`/riders/${id}/level`, (await person('customer')).token, fix)).status, 403);
+    assert.equal((await post(`/riders/${id}/level`, (await person('reception')).token, fix)).status, 403);
+    assert.equal((await post(`/riders/${id}/level`, (await person('coach')).token, fix)).status, 403, 'a coach recommends through an assessment; a manager approves');
+    assert.equal((await post(`/riders/${id}/level`, undefined, fix)).status, 401);
+    const manager = await person('manager');
+    assert.equal((await post(`/riders/${id}/level`, manager.token, { level: 'expert', reason: 'x' })).status, 400, 'not a level');
+    assert.equal((await post(`/riders/${id}/level`, manager.token, { level: 'intermediate' })).status, 400, 'a reason is required');
+    assert.equal((await post(`/riders/${id}/level`, manager.token, { level: 'intermediate', reason: '   ' })).status, 400, 'a blank reason is not a reason');
+    assert.equal((await post(`/riders/${id}/level`, manager.token, { level: 'intermediate', reason: 'Placed by the head coach' })).status, 201);
     assert.equal((await ctx.admin.query(`SELECT level FROM riders WHERE id = $1`, [id])).rows[0].level, 'intermediate');
-    assert.equal((await post(`/riders/${id}/level`, (await person('coach', [await makeBranch()])).token, { level: 'advanced' })).status, 404);
+    const history = (await ctx.admin.query(`SELECT from_level, to_level, reason, note, changed_by FROM rider_level_history WHERE rider_id = $1 ORDER BY id`, [id])).rows;
+    assert.deepEqual(history.map((h) => [h.from_level, h.to_level, h.reason]), [[null, 'beginner', 'initial'], ['beginner', 'intermediate', 'correction']]);
+    assert.equal(history[1].note, 'Placed by the head coach');
+    assert.equal(history[1].changed_by, manager.id);
+    assert.equal((await post(`/riders/${id}/level`, (await person('manager', [await makeBranch()])).token, fix)).status, 404);
   });
 
   test('reception can approve or reject a sign-up but not suspend', async () => {

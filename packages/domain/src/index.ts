@@ -8,3 +8,4 @@ export * from "./horse.ts";
 export * from "./scheduling.ts";
 export * from "./waitlist.ts";
 export * from "./recurrence.ts";
+export * from "./assessment.ts";

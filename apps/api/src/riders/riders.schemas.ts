@@ -40,7 +40,8 @@ export const UpdateRiderStaff = z
   .partial()
   .refine((v) => Object.keys(v).length > 0, 'send at least one field to change');
 
-export const SetLevel = z.object({ level: z.enum(LEVELS) });
+// A level normally changes through an approved assessment. This is for correcting a mistake, so the reason is required.
+export const SetLevel = z.object({ level: z.enum(LEVELS), reason: plain(LIMITS.reasonMax) });
 export const SetStatus = z.object({ status: z.enum(SETTABLE_RIDER_STATUSES), reason: plain(LIMITS.reasonMax).optional() });
 
 export const ListRiders = z.object({

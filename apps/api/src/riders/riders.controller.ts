@@ -32,7 +32,7 @@ export class RidersController {
   @Patch(':id') @Roles(...FAMILY_AND_STAFF)
   update(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.riders.update(id, body, user); }
 
-  @Post(':id/level') @Roles(ROLE.COACH, ROLE.MANAGER, ROLE.OWNER)
+  @Post(':id/level') @Roles(ROLE.MANAGER, ROLE.OWNER)
   level(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.riders.setLevel(id, body, user); }
 
   @Post(':id/status') @Roles(...STAFF)
