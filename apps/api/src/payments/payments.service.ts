@@ -90,7 +90,7 @@ export class PaymentsService {
           [branchId, q.riderId ?? null, q.method ?? null, q.from ?? null, q.to ?? null, q.limit, q.offset],
         )
       ).rows;
-      return { total: rows[0]?.total ?? 0, receipts: rows.map(({ total, ...r }: any) => r) };
+      return { total: rows[0]?.total ?? 0, receipts: rows.map(({ total: _total, ...r }: any) => r) };
     });
   }
 

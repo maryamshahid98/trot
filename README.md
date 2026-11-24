@@ -14,7 +14,8 @@ Right now the backend is built and tested. The portal and the mobile apps are th
 | `db` | The PostgreSQL schema (`migrations`) and demo data for development (`seed`). |
 | `apps/api` | The NestJS API. It signs people in, and it calls the domain rules inside database transactions. |
 | `docs` | Setup instructions and the acceptance scenarios the club can check. |
-| `apps/portal`, `apps/mobile` | Not started yet. |
+| `apps/web` | The admin web portal (React + Vite): sign-in, dashboard, calendar, bookings, people, horses, money, reports, staff. |
+| `apps/mobile` | Not started yet. |
 
 ## Where things stand
 
@@ -28,8 +29,13 @@ Right now the backend is built and tested. The portal and the mobile apps are th
 | API: packages, office payments, receipts, adjustments | Price list, selling packages, class balance history, adjustments and freezes, paying at the desk, receipts with VAT, refunds with limits. Needs migration `0004_receipt_numbers.sql`. |
 | API: attendance, class lifecycle, waitlist offers | Check-in, no-show, complete or cancel a class, waitlist offers with a 2-hour answer window, lapsed office holds. |
 | API: riders, documents, guardians | Sign-up of riders and children, document submit and verify, approval, level, guardians. |
-| Packages, payments, check-in, waitlist offers, horse assignment endpoints | Not started. The rules exist in `packages/domain`. |
-| Portal and mobile apps | Not started. |
+| API: horses, incidents, rides, reports, admin, background jobs | Horse assignment, incident log, ride types, reports, accounts/branches/arenas/leave admin, and a job that releases expired holds and offers. |
+| Admin web portal (`apps/web`) | In progress. |
+| Mobile apps | Not started. |
+
+## Checks
+
+CI (`.github/workflows/ci.yml`) runs on every pull request: dependency audit, lint, typecheck, domain tests, API integration tests against Postgres, and the web build. Locally: `npm run lint`, `npm run typecheck`, `npm test` (domain), `npm run test:api` (needs the database from `docker compose up -d`).
 
 ## Getting started
 

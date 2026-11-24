@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The same Postgres version as docker-compose.yml. The API tests rebuild the "trot_test" database inside it.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: trot
+          POSTGRES_PASSWORD: trot
+          POSTGRES_DB: trot
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U trot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      ADMIN_DATABASE_URL: postgres://trot:trot@localhost:5432/trot
+      TEST_ADMIN_DATABASE_URL: postgres://trot:trot@localhost:5432/trot_test
+      TEST_DATABASE_URL: postgres://trot_app:ci_app_password@localhost:5432/trot_test
+      APP_DB_PASSWORD: ci_app_password
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck (domain, api, web)
+        run: npm run typecheck
+
+      - name: Domain tests
+        run: npm test
+
+      - name: API integration tests
+        run: npm run test:api
+
+      - name: Build web
+        run: npm --workspace @trot/web run build

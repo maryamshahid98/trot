@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { api, post } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
-import { ADJUSTMENT_KINDS, DOC_KINDS, FRONT_DESK, LEVELS, MANAGER_ROLES, PACKAGE_STATUSES_SETTABLE, PAYMENT_METHODS, RIDER_STATUSES, ROLE } from '../../constants';
+import { DOC_KINDS, FRONT_DESK, LEVELS, MANAGER_ROLES, PACKAGE_STATUSES_SETTABLE, PAYMENT_METHODS, RIDER_STATUSES, ROLE } from '../../constants';
 import type { Role } from '../../constants';
 import { useBranch } from '../../lib/branch';
-import { fmtDate, fromMinor, label, money, toMinor } from '../../lib/format';
+import { fmtDate, label, money, toMinor } from '../../lib/format';
 import { qs, useQuery } from '../../lib/useApi';
 import type { PackageType, RiderDetail } from '../../lib/types';
 import { FormDialog } from '../../ui/FormDialog';
