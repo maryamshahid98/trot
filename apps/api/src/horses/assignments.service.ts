@@ -1,6 +1,6 @@
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { checkHorse, MS } from '@trot/domain';
-import type { Horse, Occurrence, Reason } from '@trot/domain';
+import type { Horse, Level, Occurrence, Reason } from '@trot/domain';
 import type { AuthUser } from '../auth/decorators.ts';
 import { lockOccurrence, LIVE, toOccurrence } from '../bookings/core.ts';
 import type { Tx } from '../bookings/core.ts';
@@ -11,6 +11,7 @@ import { parse } from '../common/validate.ts';
 import { AUDIT, ENTITY, HORSE_PROBLEM, HORSE_STATUS, LIMITS, OCCURRENCE_STATUS, OVERRIDABLE_HORSE_CODES, PG_ERROR, ROLE } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
 import { AssignHorse, AssignmentParams, IdParam, SuggestQuery } from './horses.schemas.ts';
+import { pgErrorCode } from '../common/errors.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -56,8 +57,8 @@ export class AssignmentsService {
     const tz = (await c.query(`SELECT time_zone FROM branches WHERE id = $1`, [occ.branchId])).rows[0]?.time_zone as string;
     void now;
     return checkHorse({
-      horse, occurrence: occ, riderLevels: riderLevels as any, policy: await loadPolicy(c, occ.branchId), dayKeyOf: dayKeyFor(tz),
-      assignments: rows.map((a: any) => ({ ...a, startsAt: Number(a.startsAt), endsAt: Number(a.endsAt) })),
+      horse, occurrence: occ, riderLevels: riderLevels as Level[], policy: await loadPolicy(c, occ.branchId), dayKeyOf: dayKeyFor(tz),
+      assignments: rows.map((a) => ({ horseId: a.horseId, occurrenceId: a.occurrenceId, startsAt: Number(a.startsAt), endsAt: Number(a.endsAt) })),
     }).reasons;
   }
 
@@ -102,7 +103,7 @@ export class AssignmentsService {
         } else {
           riderLevels = (
             await c.query(`SELECT DISTINCT r.level FROM bookings bk JOIN riders r ON r.id = bk.rider_id WHERE bk.occurrence_id = $1 AND bk.status = ANY($2::booking_status[])`, [occ.id, LIVE])
-          ).rows.map((x: any) => x.level);
+          ).rows.map((x) => x.level);
         }
 
         // Lock the horse so two people planning its week at the same moment count its sessions one after the other.
@@ -127,10 +128,10 @@ export class AssignmentsService {
         });
         return { id: ins.id as string, overridden, problems: overridden ? reasons : [] };
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       // The database is the last line of defence if two people give the same horse to two classes at the same moment.
-      if (e?.code === PG_ERROR.EXCLUSION_VIOLATION) throw new ConflictException(problem('That horse was just given to another class at this time.', HORSE_PROBLEM.HORSE_BUSY));
-      if (e?.code === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException(problem('That rider already has a horse for this class.', HORSE_PROBLEM.RIDER_HAS_HORSE));
+      if (pgErrorCode(e) === PG_ERROR.EXCLUSION_VIOLATION) throw new ConflictException(problem('That horse was just given to another class at this time.', HORSE_PROBLEM.HORSE_BUSY));
+      if (pgErrorCode(e) === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException(problem('That rider already has a horse for this class.', HORSE_PROBLEM.RIDER_HAS_HORSE));
       throw e;
     }
   }
@@ -162,7 +163,7 @@ export class AssignmentsService {
         if (!r) throw new UnprocessableEntityException(problem('That rider is not booked into this class.', HORSE_PROBLEM.RIDER_NOT_IN_CLASS));
         riderLevels = [r.level];
       } else {
-        riderLevels = (await c.query(`SELECT DISTINCT r.level FROM bookings bk JOIN riders r ON r.id = bk.rider_id WHERE bk.occurrence_id = $1 AND bk.status = ANY($2::booking_status[])`, [occ.id, LIVE])).rows.map((x: any) => x.level);
+        riderLevels = (await c.query(`SELECT DISTINCT r.level FROM bookings bk JOIN riders r ON r.id = bk.rider_id WHERE bk.occurrence_id = $1 AND bk.status = ANY($2::booking_status[])`, [occ.id, LIVE])).rows.map((x) => x.level);
       }
       const horses = (await c.query(`SELECT h.id, h.name FROM horses h WHERE h.branch_id = $1 AND h.status <> $2 ORDER BY h.name LIMIT $3`, [occ.branchId, HORSE_STATUS.RETIRED, LIMITS.horseSuggestionsMax])).rows;
       const suitable: { id: string; name: string }[] = [];

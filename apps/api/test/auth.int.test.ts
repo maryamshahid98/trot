@@ -164,7 +164,10 @@ test('forged tokens are refused: wrong key, "alg none", expired, wrong audience,
   assert.equal((await api('GET', '/auth/me', { token: iss })).status, 401, 'wrong issuer');
   const notId = await new SignJWT({}).setProtectedHeader({ alg: 'HS256' }).setSubject(`1' OR '1'='1`).setIssuer('trot').setAudience('trot-api').setExpirationTime('10m').sign(secret());
   assert.equal((await api('GET', '/auth/me', { token: notId })).status, 401, 'subject is not an id');
-  const tampered = (await good().sign(secret())).replace(/.$/, (c) => (c === 'A' ? 'B' : 'A'));
+  // Change a character in the middle of the signature. The last character of a base64 value carries unused bits, so changing
+  // only that one can leave the decoded signature identical and the token still valid (a flaky test, 1 run in 16).
+  const [head, payload, sig] = (await good().sign(secret())).split('.');
+  const tampered = [head, payload, sig.slice(0, 10) + (sig[10] === 'A' ? 'B' : 'A') + sig.slice(11)].join('.');
   assert.equal((await api('GET', '/auth/me', { token: tampered })).status, 401, 'tampered signature');
 });
 

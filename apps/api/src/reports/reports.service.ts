@@ -8,6 +8,12 @@ import { ADJUSTMENT_KIND, AUDIT, BOOKING_STATUS, LIMITS, OCCURRENCE_STATUS, REPO
 import { DbService } from '../db/db.service.ts';
 import { AuditQuery, RangeQuery, UnpaidQuery } from './reports.schemas.ts';
 
+/** One line of the ride-type report: counts and money, built up from three separate queries. */
+interface RideTypeLine {
+  rideTypeId: string; name: string; rides: number; places: number; booked: number; noShows: number;
+  receipts: number; grossMinor: number; vatMinor: number; refundsMinor: number;
+}
+
 const problem = (message: string, code: string, field = 'to') => ({ message, problems: [{ code, field, message }] });
 const iso = (ms: number) => new Date(ms).toISOString();
 
@@ -37,7 +43,7 @@ export class ReportsService {
       const adj = (
         await c.query(`SELECT kind, count(*)::int AS n, sum(amount_minor)::bigint AS total FROM financial_adjustments WHERE branch_id = $1 AND created_at >= $2::timestamptz AND created_at < $3::timestamptz GROUP BY kind`, [branchId, from, to])
       ).rows;
-      const adjusted = (kind: string) => Number(adj.find((a: any) => a.kind === kind)?.total ?? 0);
+      const adjusted = (kind: string) => Number(adj.find((a) => a.kind === kind)?.total ?? 0);
       const grossMinor = Number(total.gross);
       return {
         from, to, timeZone: tz,
@@ -45,8 +51,8 @@ export class ReportsService {
         refundsMinor: adjusted(ADJUSTMENT_KIND.REFUND),
         netMinor: grossMinor - adjusted(ADJUSTMENT_KIND.REFUND),
         otherAdjustments: { creditMinor: adjusted(ADJUSTMENT_KIND.CREDIT), writeOffMinor: adjusted(ADJUSTMENT_KIND.WRITE_OFF), correctionMinor: adjusted(ADJUSTMENT_KIND.CORRECTION) },
-        byMethod: byMethod.map((r: any) => ({ ...r, amountMinor: Number(r.amountMinor) })),
-        byDay: byDay.map((r: any) => ({ ...r, amountMinor: Number(r.amountMinor) })),
+        byMethod: byMethod.map((r) => ({ ...r, amountMinor: Number(r.amountMinor) })),
+        byDay: byDay.map((r) => ({ ...r, amountMinor: Number(r.amountMinor) })),
       };
     });
   }
@@ -88,10 +94,10 @@ export class ReportsService {
           [branchId, from, to, [OCCURRENCE_STATUS.PUBLISHED, OCCURRENCE_STATUS.IN_PROGRESS, OCCURRENCE_STATUS.COMPLETED],
            [BOOKING_STATUS.PENDING_OFFICE_PAYMENT, BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.COMPLETED]],
         )
-      ).rows.map((r: any) => ({ ...r, utilisation: r.places === 0 ? null : Math.round((r.filled / r.places) * 1000) / 1000 }));
-      const places = rows.reduce((s: number, r: any) => s + r.places, 0);
-      const filled = rows.reduce((s: number, r: any) => s + r.filled, 0);
-      return { from, to, classes: rows.reduce((s: number, r: any) => s + r.classes, 0), places, filled, utilisation: places === 0 ? null : Math.round((filled / places) * 1000) / 1000, byArena: rows };
+      ).rows.map((r) => ({ ...r, utilisation: r.places === 0 ? null : Math.round((r.filled / r.places) * 1000) / 1000 }));
+      const places = rows.reduce((s: number, r) => s + r.places, 0);
+      const filled = rows.reduce((s: number, r) => s + r.filled, 0);
+      return { from, to, classes: rows.reduce((s: number, r) => s + r.classes, 0), places, filled, utilisation: places === 0 ? null : Math.round((filled / places) * 1000) / 1000, byArena: rows };
     });
   }
 
@@ -139,18 +145,25 @@ export class ReportsService {
         )
       ).rows;
 
-      const byType = new Map<string, any>();
-      const row = (id: string, name: string) => {
-        if (!byType.has(id)) byType.set(id, { rideTypeId: id, name, rides: 0, places: 0, booked: 0, noShows: 0, receipts: 0, grossMinor: 0, vatMinor: 0, refundsMinor: 0 });
-        return byType.get(id);
+      const byType = new Map<string, RideTypeLine>();
+      const row = (id: string, name: string): RideTypeLine => {
+        let line = byType.get(id);
+        if (!line) {
+          line = { rideTypeId: id, name, rides: 0, places: 0, booked: 0, noShows: 0, receipts: 0, grossMinor: 0, vatMinor: 0, refundsMinor: 0 };
+          byType.set(id, line);
+        }
+        return line;
       };
       for (const o of occupancy) Object.assign(row(o.rideTypeId, o.name), { rides: o.rides, places: o.places, booked: o.booked, noShows: o.noShows });
       for (const s of sales) Object.assign(row(s.rideTypeId, s.name), { receipts: s.receipts, grossMinor: Number(s.gross), vatMinor: Number(s.vat) });
-      for (const r of refunds) if (byType.has(r.rideTypeId)) byType.get(r.rideTypeId).refundsMinor = Number(r.refunds);
+      for (const r of refunds) {
+        const line = byType.get(r.rideTypeId);
+        if (line) line.refundsMinor = Number(r.refunds);
+      }
       const list = [...byType.values()]
         .map((t) => ({ ...t, utilisation: t.places === 0 ? null : Math.round((t.booked / t.places) * 1000) / 1000, netMinor: t.grossMinor - t.refundsMinor }))
         .sort((a, b) => a.name.localeCompare(b.name));
-      const sum = (k: string) => list.reduce((n, t) => n + (t as any)[k], 0);
+      const sum = (k: keyof Omit<RideTypeLine, 'rideTypeId' | 'name'> | 'netMinor') => list.reduce((n, t) => n + t[k], 0);
       const places = sum('places');
       return {
         from, to,
@@ -177,8 +190,8 @@ export class ReportsService {
             ORDER BY lower(o.during) LIMIT $4`,
           [branchId, AUDIT.BOOKING_CONFIRM_UNPAID, [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.COMPLETED], q.limit],
         )
-      ).rows.map((r: any) => ({ ...r, startsAt: Number(r.startsAt) }));
-      return { unpaid: rows, owedMinor: rows.reduce((s: number, r: any) => s + r.priceMinor, 0) };
+      ).rows.map((r) => ({ ...r, startsAt: Number(r.startsAt) }));
+      return { unpaid: rows, owedMinor: rows.reduce((s: number, r) => s + r.priceMinor, 0) };
     });
   }
 
@@ -197,7 +210,7 @@ export class ReportsService {
         [branches, q.action ?? null, q.entity ?? null, q.entityId ?? null, q.actorId ?? null, q.from ?? null, q.to ?? null, q.before ?? null, q.limit + 1],
       )
     ).rows;
-    const page = rows.slice(0, q.limit).map((r: any) => ({ ...r, at: Number(r.at) }));
-    return { entries: page, nextBefore: rows.length > q.limit ? Number(page[page.length - 1].id) : null };
+    const page = rows.slice(0, q.limit).map((r) => ({ ...r, at: Number(r.at) }));
+    return { entries: page, nextBefore: rows.length > q.limit ? Number(rows[q.limit - 1].id) : null };
   }
 }

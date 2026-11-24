@@ -9,6 +9,7 @@ import { AUDIT, ENTITY, HORSE_PROBLEM, HORSE_STATUS, LIMITS, OCCURRENCE_STATUS, 
 import { DbService } from '../db/db.service.ts';
 import type { Tx } from '../bookings/core.ts';
 import { CreateHorse, IdParam, ListHorses, SetHorseStatus, UpdateHorse, WorkloadQuery } from './horses.schemas.ts';
+import { pgErrorCode } from '../common/errors.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
 const likePattern = (q: string) => `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
@@ -60,15 +61,15 @@ export class HorsesService {
         await writeAudit(c, user, branchId, AUDIT.HORSE_CREATE, ENTITY.HORSE, id, { name: b.name });
         return { id };
       });
-    } catch (e: any) {
-      if (e?.code === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException('A horse with that name already exists in this branch.');
+    } catch (e: unknown) {
+      if (pgErrorCode(e) === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException('A horse with that name already exists in this branch.');
       throw e;
     }
   }
 
   async update(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    const b: Record<string, any> = parse(UpdateHorse, body);
+    const b = parse(UpdateHorse, body);
     try {
       return await this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
         const h = (await c.query(`SELECT id, branch_id AS "branchId", status FROM horses WHERE id = $1 FOR UPDATE`, [id])).rows[0];
@@ -83,16 +84,17 @@ export class HorsesService {
           sets.push(`${col[key]}${params.length}${key === 'suitableLevels' ? '::level[]' : ''}`);
         }
         if (sets.length) await c.query(`UPDATE horses SET ${sets.join(', ')} WHERE id = $1`, params);
-        if ('arenaIds' in b) {
-          await this.arenasInBranch(c, h.branchId, b.arenaIds);
+        const arenaIds = b.arenaIds;
+        if (arenaIds !== undefined) {
+          await this.arenasInBranch(c, h.branchId, arenaIds);
           await c.query(`DELETE FROM horse_arenas WHERE horse_id = $1`, [id]);
-          for (const a of b.arenaIds) await c.query(`INSERT INTO horse_arenas (horse_id, arena_id) VALUES ($1,$2)`, [id, a]);
+          for (const a of arenaIds) await c.query(`INSERT INTO horse_arenas (horse_id, arena_id) VALUES ($1,$2)`, [id, a]);
         }
         await writeAudit(c, user, h.branchId, AUDIT.HORSE_UPDATE, ENTITY.HORSE, id, { fields: Object.keys(b) });
         return (await c.query(`SELECT ${HORSE_COLS} FROM horses h WHERE h.id = $1`, [id])).rows[0];
       });
-    } catch (e: any) {
-      if (e?.code === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException('A horse with that name already exists in this branch.');
+    } catch (e: unknown) {
+      if (pgErrorCode(e) === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException('A horse with that name already exists in this branch.');
       throw e;
     }
   }
@@ -149,7 +151,7 @@ export class HorsesService {
             WHERE ha.horse_id = $1 AND ha.during && tstzrange($2::timestamptz, $3::timestamptz) AND o.status <> $5 ORDER BY lower(o.during)`,
           [id, iso(from), iso(to), h.tz, OCCURRENCE_STATUS.CANCELLED],
         )
-      ).rows.map((s: any) => ({ ...s, startsAt: Number(s.startsAt), endsAt: Number(s.endsAt) }));
+      ).rows.map((s) => ({ ...s, startsAt: Number(s.startsAt), endsAt: Number(s.endsAt) }));
       const perDay: Record<string, number> = {};
       for (const s of sessions) perDay[s.day] = (perDay[s.day] ?? 0) + 1;
       return { horse: { id: h.id, name: h.name }, total: sessions.length, perDay, sessions };

@@ -14,6 +14,7 @@ import { ACCOUNT_STATUS, AUDIT, ENTITY, LEAVE_STATUS, LIMITS, OCCURRENCE_STATUS,
 import { DbService } from '../db/db.service.ts';
 import { CreateClass, ListQuery } from './schedule.schemas.ts';
 import type { Tx } from '../bookings/core.ts';
+import { pgErrorCode } from '../common/errors.ts';
 
 const EPOCH_MS = (col: string) => `(extract(epoch from ${col}) * 1000)::bigint`;
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -135,7 +136,7 @@ export class ScheduleService {
               AND during && tstzrange($2::timestamptz, $3::timestamptz)`,
           [branchId, from, to, OCCURRENCE_STATUS.CANCELLED],
         );
-        const existing: Occurrence[] = existingRows.rows.map((o: any) => ({ ...o, startsAt: Number(o.startsAt), endsAt: Number(o.endsAt) }));
+        const existing: Occurrence[] = existingRows.rows.map((o) => ({ ...o, startsAt: Number(o.startsAt), endsAt: Number(o.endsAt) }));
 
         const closures = await c.query(
           `SELECT id, arena_id AS "targetId", ${EPOCH_MS('lower(during)')} AS "from", ${EPOCH_MS('upper(during)')} AS "to"
@@ -149,8 +150,8 @@ export class ScheduleService {
           [b.coachId, from, to, LEAVE_STATUS.APPROVED],
         );
         const blackouts: Blackout[] = [
-          ...closures.rows.map((r: any) => ({ id: r.id, kind: 'arena_closure' as const, targetId: r.targetId, from: Number(r.from), to: Number(r.to) })),
-          ...leave.rows.map((r: any) => ({ id: r.id, kind: 'coach_unavailable' as const, targetId: r.targetId, from: Number(r.from), to: Number(r.to) })),
+          ...closures.rows.map((r) => ({ id: r.id, kind: 'arena_closure' as const, targetId: r.targetId, from: Number(r.from), to: Number(r.to) })),
+          ...leave.rows.map((r) => ({ id: r.id, kind: 'coach_unavailable' as const, targetId: r.targetId, from: Number(r.from), to: Number(r.to) })),
         ];
 
         const reasons = validateOccurrence({ id: 'new', startsAt, endsAt, capacity: b.capacity, arenaId: b.arenaId, coachId: b.coachId }, existing, blackouts);
@@ -178,11 +179,11 @@ export class ScheduleService {
         );
         return { id, overridden, problems: reasons };
       });
-    } catch (e: any) {
+    } catch (e: unknown) {
       // The database is the last line of defence if two people schedule at the same moment.
-      if (e?.code === PG_ERROR.EXCLUSION_VIOLATION) throw new ConflictException('Someone else just booked that arena or coach at this time. Please check the schedule and try again.');
-      if (e?.code === PG_ERROR.FOREIGN_KEY_VIOLATION) throw new BadRequestException('Unknown branch, arena or coach.');
-      if (e?.code === PG_ERROR.INSUFFICIENT_PRIVILEGE) throw new ForbiddenException('That is outside the branches you may work in.');
+      if (pgErrorCode(e) === PG_ERROR.EXCLUSION_VIOLATION) throw new ConflictException('Someone else just booked that arena or coach at this time. Please check the schedule and try again.');
+      if (pgErrorCode(e) === PG_ERROR.FOREIGN_KEY_VIOLATION) throw new BadRequestException('Unknown branch, arena or coach.');
+      if (pgErrorCode(e) === PG_ERROR.INSUFFICIENT_PRIVILEGE) throw new ForbiddenException('That is outside the branches you may work in.');
       throw e;
     }
   }

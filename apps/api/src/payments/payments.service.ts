@@ -10,6 +10,7 @@ import { ADJUSTMENT_KIND, AUDIT, BOOKING_STATUS, ENTITY, PAYMENT_PROBLEM, ROLE }
 import { DbService } from '../db/db.service.ts';
 import { ConfirmUnpaid, CreateAdjustment, IdParam, ListReceipts, RecordPayment } from './payments.schemas.ts';
 import { issueReceipt } from './receipts.ts';
+import type { Row, Tx } from '../common/sql.ts';
 
 const problem = (message: string, code: string, extra: object = {}) => ({ message, problems: [{ code, message }], ...extra });
 const RECEIPT_COLS = `r.id, r.number, r.amount_minor AS "amountMinor", r.vat_minor AS "vatMinor", r.method, r.issued_at AS "issuedAt",
@@ -20,7 +21,7 @@ export class PaymentsService {
   constructor(@Inject(DbService) private readonly db: DbService) {}
 
   /** Loads a booking and locks its class first, the same order every other booking action uses. */
-  private async lockBooking(c: any, id: string) {
+  private async lockBooking(c: Tx, id: string) {
     const pre = (await c.query(`SELECT occurrence_id AS "occurrenceId" FROM bookings WHERE id = $1`, [id])).rows[0];
     if (!pre) throw new NotFoundException('Booking not found.');
     const occ = (await lockOccurrence(c, pre.occurrenceId))!;
@@ -33,7 +34,7 @@ export class PaymentsService {
     return { b, occ };
   }
 
-  private mustBePending(b: any, now: number) {
+  private mustBePending(b: Row, now: number) {
     if (b.status === BOOKING_STATUS.CONFIRMED || b.status === BOOKING_STATUS.CHECKED_IN || b.status === BOOKING_STATUS.COMPLETED) {
       return problem('This booking is already paid.', PAYMENT_PROBLEM.ALREADY_PAID);
     }
@@ -90,7 +91,7 @@ export class PaymentsService {
           [branchId, q.riderId ?? null, q.method ?? null, q.from ?? null, q.to ?? null, q.limit, q.offset],
         )
       ).rows;
-      return { total: rows[0]?.total ?? 0, receipts: rows.map(({ total: _total, ...r }: any) => r) };
+      return { total: rows[0]?.total ?? 0, receipts: rows.map(({ total: _total, ...r }) => r) };
     });
   }
 

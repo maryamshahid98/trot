@@ -1,5 +1,6 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { canAccept } from '@trot/domain';
+import type { WaitlistEntry } from '@trot/domain';
 import type { AuthUser } from '../auth/decorators.ts';
 import { OWNS_RIDER, writeAudit } from '../common/audit.ts';
 import { loadPolicy } from '../common/policy.ts';
@@ -9,6 +10,8 @@ import { DbService } from '../db/db.service.ts';
 import { AcceptOffer, IdParam } from './bookings.schemas.ts';
 import { cannotBook } from './bookings.service.ts';
 import { evaluate, expireStaleHolds, insertBooking, loadClassState, lockOccurrence, promoteWaitlist, toOccurrence } from './core.ts';
+import { pgErrorCode } from '../common/errors.ts';
+import type { Tx } from '../common/sql.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
 
@@ -17,7 +20,7 @@ export class WaitlistService {
   constructor(@Inject(DbService) private readonly db: DbService) {}
 
   /** Finds the entry the caller may act on, then locks its class before the entry itself (same lock order as everywhere else). */
-  private async lockEntry(c: any, id: string, user: AuthUser) {
+  private async lockEntry(c: Tx, id: string, user: AuthUser) {
     const customer = user.role === ROLE.CUSTOMER;
     const pre = (
       await c.query(
@@ -49,7 +52,7 @@ export class WaitlistService {
         const occ = toOccurrence(occRow) as typeof occRow;
         if (entry.status !== WAITLIST_STATUS.OFFERED) return { fail: problem('There is no open offer for this entry.', FLOW_PROBLEM.NOT_OFFERED) };
         const offer = { ...entry, joinedAt: Date.parse(entry.joinedAt), offerExpiresAt: Date.parse(entry.offerExpiresAt) };
-        if (!canAccept(offer as any, now)) {
+        if (!canAccept(offer as WaitlistEntry, now)) {
           // The offer timed out: close it and pass the place on. This must be saved, so report the failure after the transaction commits.
           await c.query(`UPDATE waitlist_entries SET status = $2 WHERE id = $1`, [id, WAITLIST_STATUS.EXPIRED]);
           await promoteWaitlist(c, occ, now, policy, null);
@@ -73,9 +76,9 @@ export class WaitlistService {
       });
       if ('fail' in out && out.fail) throw new ConflictException(out.fail);
       return out.ok;
-    } catch (e: any) {
-      if (e?.code === PG_ERROR.CHECK_VIOLATION) throw cannotBook([{ code: PROBLEM.NO_PACKAGE_BALANCE, message: 'No classes left in the package.' }]);
-      if (e?.code === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException('This rider already has a booking for this class.');
+    } catch (e: unknown) {
+      if (pgErrorCode(e) === PG_ERROR.CHECK_VIOLATION) throw cannotBook([{ code: PROBLEM.NO_PACKAGE_BALANCE, message: 'No classes left in the package.' }]);
+      if (pgErrorCode(e) === PG_ERROR.UNIQUE_VIOLATION) throw new ConflictException('This rider already has a booking for this class.');
       throw e;
     }
   }
@@ -92,7 +95,7 @@ export class WaitlistService {
       const status = entry.status === WAITLIST_STATUS.OFFERED ? WAITLIST_STATUS.DECLINED : WAITLIST_STATUS.REMOVED;
       await c.query(`UPDATE waitlist_entries SET status = $2 WHERE id = $1`, [id, status]);
       await writeAudit(c, user, occRow.branchId, AUDIT.WAITLIST_LEAVE, ENTITY.WAITLIST_ENTRY, id, { status });
-      const offers = await promoteWaitlist(c, { ...toOccurrence(occRow), branchId: occRow.branchId } as any, now, await loadPolicy(c, occRow.branchId), user);
+      const offers = await promoteWaitlist(c, { ...toOccurrence(occRow), branchId: occRow.branchId }, now, await loadPolicy(c, occRow.branchId), user);
       return { id, status, waitlistOffers: offers.length };
     });
   }
@@ -103,7 +106,7 @@ export class WaitlistService {
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const occRow = await lockOccurrence(c, id);
       if (!occRow) throw new NotFoundException('Class not found.');
-      const offers = await promoteWaitlist(c, { ...toOccurrence(occRow), branchId: occRow.branchId } as any, Date.now(), await loadPolicy(c, occRow.branchId), user);
+      const offers = await promoteWaitlist(c, { ...toOccurrence(occRow), branchId: occRow.branchId }, Date.now(), await loadPolicy(c, occRow.branchId), user);
       return { offers };
     });
   }

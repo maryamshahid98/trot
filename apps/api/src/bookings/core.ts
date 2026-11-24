@@ -4,12 +4,13 @@
 import { checkEligibility, MS, spotsLeft } from '@trot/domain';
 import type { Booking, Occurrence, Policy, Reason, Rider } from '@trot/domain';
 import { dayKeyFor, epochMs } from '../common/sql.ts';
+import type { Row, Tx } from '../common/sql.ts';
 import { writeAudit } from '../common/audit.ts';
 import {
   AUDIT, BOOKING_STATUS, DOC_KIND, DOC_STATUS, ENTITY, LEDGER_REASON, OCCURRENCE_STATUS, PACKAGE_STATUS, PAY_WITH, PROBLEM, RIDE_FORMAT, WAITLIST_STATUS,
 } from '../config/constants.ts';
 
-export type Tx = { query: (sql: string, params?: unknown[]) => Promise<{ rows: any[]; rowCount: number | null }> };
+export type { Tx } from '../common/sql.ts';
 
 /** Bookings that still hold a place (or are about to be used). */
 export const LIVE = [BOOKING_STATUS.PENDING_OFFICE_PAYMENT, BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.COMPLETED];
@@ -18,8 +19,8 @@ export const OCC_COLS = `o.id, o.branch_id AS "branchId", o.title, o.format, o.m
   o.min_age_years AS "minAgeYears", o.price_minor AS "priceMinor", o.arena_id AS "arenaId", o.coach_id AS "coachId",
   ${epochMs('lower(o.during)')} AS "startsAt", ${epochMs('upper(o.during)')} AS "endsAt"`;
 
-export const toOccurrence = (o: any): Occurrence => ({ ...o, startsAt: Number(o.startsAt), endsAt: Number(o.endsAt) });
-export const toBooking = (r: any): Booking => ({
+export const toOccurrence = (o: Row): Occurrence => ({ ...(o as Omit<Occurrence, 'startsAt' | 'endsAt'>), startsAt: Number(o.startsAt), endsAt: Number(o.endsAt) });
+export const toBooking = (r: Row): Booking => ({
   id: r.id, riderId: r.riderId, occurrenceId: r.occurrenceId, status: r.status, payWith: r.payWith, packageId: r.packageId ?? undefined, createdAt: Number(r.createdAt),
 });
 
@@ -82,7 +83,7 @@ export async function loadRiderBookings(c: Tx, riderId: string) {
       [riderId, LIVE],
     )
   ).rows;
-  return rows.map((r: any) => ({ booking: toBooking({ ...r, id: r.bookingId, status: r.bookingStatus }), occurrence: toOccurrence(r) }));
+  return rows.map((r) => ({ booking: toBooking({ ...r, id: r.bookingId, status: r.bookingStatus }), occurrence: toOccurrence(r) }));
 }
 
 /** Who holds a place in this class right now, and how many places are promised to people with an open waitlist offer. */

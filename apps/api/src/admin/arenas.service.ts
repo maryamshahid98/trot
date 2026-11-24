@@ -29,7 +29,7 @@ export class ArenasService {
           WHERE arena_id = $1 AND status <> $2 AND during && tstzrange($3::timestamptz, $4::timestamptz) ORDER BY lower(during) LIMIT $5`,
         [arenaId, OCCURRENCE_STATUS.CANCELLED, from, to, LIMITS.affectedClassesShown],
       )
-    ).rows.map((r: any) => ({ id: r.id, title: r.title, startsAt: Number(r.startsAt) }));
+    ).rows.map((r) => ({ id: r.id, title: r.title, startsAt: Number(r.startsAt) }));
   }
 
   async list(query: unknown, user: AuthUser) {
@@ -73,7 +73,7 @@ export class ArenasService {
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       if (!(await c.query(`SELECT 1 FROM arenas WHERE id = $1`, [id])).rowCount) throw new NotFoundException(problem('Arena not found.', ADMIN_PROBLEM.ARENA_NOT_FOUND));
       const rows = (await c.query(`SELECT id, ${epochMs('lower(during)')} AS "from", ${epochMs('upper(during)')} AS "to", reason FROM arena_closures WHERE arena_id = $1 AND upper(during) > now() ORDER BY lower(during)`, [id])).rows;
-      return { closures: rows.map((r: any) => ({ ...r, from: Number(r.from), to: Number(r.to) })) };
+      return { closures: rows.map((r) => ({ ...r, from: Number(r.from), to: Number(r.to) })) };
     });
   }
 

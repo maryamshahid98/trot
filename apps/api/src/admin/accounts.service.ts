@@ -7,6 +7,7 @@ import { parse } from '../common/validate.ts';
 import { ACCOUNT_STATUS, ADMIN_PROBLEM, AUDIT, ENTITY, OCCURRENCE_STATUS, PG_ERROR, ROLE, ROLE_RANK } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
 import { CreateAccount, IdParam, ListAccounts, ResetPassword, SetBranches, SetRole, SetStatus, UpdateAccount } from './accounts.schemas.ts';
+import { pgConstraint, pgErrorCode } from '../common/errors.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
 const rank = (role: string): number => (ROLE_RANK as Record<string, number>)[role] ?? 0;
@@ -61,9 +62,9 @@ export class AccountsService {
   private async revokeSessions(c: pg.PoolClient, accountId: string) {
     await c.query(`UPDATE refresh_tokens SET revoked_at = now() WHERE account_id = $1 AND revoked_at IS NULL`, [accountId]);
   }
-  private conflictFrom(e: any): never {
-    if (e?.code === PG_ERROR.UNIQUE_VIOLATION) {
-      const phone = String(e.constraint ?? '').includes('phone');
+  private conflictFrom(e: unknown): never {
+    if (pgErrorCode(e) === PG_ERROR.UNIQUE_VIOLATION) {
+      const phone = String(pgConstraint(e) ?? '').includes('phone');
       throw new ConflictException(phone ? problem('That phone number is already used by another account.', ADMIN_PROBLEM.PHONE_TAKEN) : problem('That email is already used by another account.', ADMIN_PROBLEM.EMAIL_TAKEN));
     }
     throw e;
@@ -110,7 +111,7 @@ export class AccountsService {
 
   async update(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    const b: Record<string, any> = parse(UpdateAccount, body);
+    const b: Record<string, unknown> = parse(UpdateAccount, body);
     try {
       await this.db.tx(async (c) => {
         const t = await this.target(c, id, user);
@@ -215,7 +216,7 @@ export class AccountsService {
       this.outranks(user, t);
       this.notDeleted(t);
       this.requireStaff(t);
-      const current: string[] = (await c.query(`SELECT branch_id::text AS b FROM account_branches WHERE account_id = $1`, [id])).rows.map((r: any) => r.b);
+      const current: string[] = (await c.query(`SELECT branch_id::text AS b FROM account_branches WHERE account_id = $1`, [id])).rows.map((r) => r.b);
       const mine = current.filter((x) => user.branchIds.includes(x));
       const removed = mine.filter((x) => !b.branchIds.includes(x));
       const added = b.branchIds.filter((x) => !current.includes(x));
@@ -225,7 +226,7 @@ export class AccountsService {
       for (const br of removed) await c.query(`DELETE FROM account_branches WHERE account_id = $1 AND branch_id = $2`, [id, br]);
       for (const br of added) await c.query(`INSERT INTO account_branches (account_id, branch_id) VALUES ($1,$2)`, [id, br]);
       await writeAudit(c, user, this.commonBranch(user, b.branchIds), AUDIT.ACCOUNT_BRANCHES, ENTITY.ACCOUNT, id, { added, removed });
-      return { id, branchIds: (await c.query(`SELECT branch_id::text AS b FROM account_branches WHERE account_id = $1 AND branch_id = ANY($2::uuid[]) ORDER BY 1`, [id, user.branchIds])).rows.map((r: any) => r.b) };
+      return { id, branchIds: (await c.query(`SELECT branch_id::text AS b FROM account_branches WHERE account_id = $1 AND branch_id = ANY($2::uuid[]) ORDER BY 1`, [id, user.branchIds])).rows.map((r) => r.b) };
     });
   }
 }

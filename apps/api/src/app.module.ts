@@ -19,6 +19,7 @@ import { ConfigModule } from './config/config.module.ts';
 import { DbModule } from './db/db.module.ts';
 import { HealthController } from './health/health.controller.ts';
 import { ScheduleModule } from './schedule/schedule.module.ts';
+import type { ApiRequest, ApiResponse } from './common/http.ts';
 
 @Module({
   imports: [ConfigModule, DbModule, CommonModule, AuthModule, ScheduleModule, BookingsModule, RidersModule, PaymentsModule, HorsesModule, AdminModule, JobsModule, ReportsModule, IncidentsModule, RidesModule],
@@ -34,7 +35,7 @@ import { ScheduleModule } from './schedule/schedule.module.ts';
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer
-      .apply((req: any, res: any, next: () => void) => {
+      .apply((req: ApiRequest, res: ApiResponse, next: () => void) => {
         req.id = randomUUID();
         res.setHeader('X-Request-Id', req.id);
         next();

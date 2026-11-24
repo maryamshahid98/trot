@@ -1,3 +1,11 @@
+import type pg from 'pg';
+
+/** What a service needs from its open transaction: run a query. Rows come back as pg gives them, with untyped columns. */
+/** One row as pg returns it: columns by name, values untyped. Convert what you use (numbers arrive as strings, for example). */
+export type Row = pg.QueryResultRow;
+
+export type Tx = { query: (sql: string, params?: unknown[]) => Promise<{ rows: pg.QueryResultRow[]; rowCount: number | null }> };
+
 /** SQL that turns a timestamp expression into epoch milliseconds, the unit the rules code uses. Only pass literal column expressions. */
 export const epochMs = (expr: string) => `(extract(epoch from ${expr}) * 1000)::bigint`;
 

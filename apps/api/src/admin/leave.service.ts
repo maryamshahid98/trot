@@ -4,6 +4,7 @@ import type pg from 'pg';
 import type { AuthUser } from '../auth/decorators.ts';
 import { writeAudit } from '../common/audit.ts';
 import { epochMs } from '../common/sql.ts';
+import type { Row } from '../common/sql.ts';
 import { parse } from '../common/validate.ts';
 import { ADMIN_PROBLEM, AUDIT, DECISIONS, ENTITY, LEAVE_STATUS, LIMITS, OCCURRENCE_STATUS, ROLE, ROLE_RANK } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
@@ -15,7 +16,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 const isBoss = (u: AuthUser) => u.role === ROLE.MANAGER || u.role === ROLE.OWNER;
 const VISIBLE = `EXISTS (SELECT 1 FROM account_branches ab WHERE ab.account_id = s.id AND ab.branch_id = ANY($1::uuid[]))`;
 const COLS = `l.id, l.staff_account_id AS "staffId", s.full_name AS "staffName", ${epochMs('lower(l.during)')} AS "from", ${epochMs('upper(l.during)')} AS "to", l.reason, l.status`;
-const view = (r: any) => ({ ...r, from: Number(r.from), to: Number(r.to) });
+const view = <T extends Row>(r: T) => ({ ...r, from: Number(r.from), to: Number(r.to) });
 
 @Injectable()
 export class LeaveService {
@@ -33,7 +34,7 @@ export class LeaveService {
         )
       ).rows,
     );
-    return rows.map((r: any) => ({ id: r.id, title: r.title, startsAt: Number(r.startsAt) }));
+    return rows.map((r) => ({ id: r.id, title: r.title, startsAt: Number(r.startsAt) }));
   }
 
   /** Staff ask for time off for themselves; managers can record it for staff below them (approved at once). */

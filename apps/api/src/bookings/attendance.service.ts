@@ -11,6 +11,7 @@ import {
 import { DbService } from '../db/db.service.ts';
 import { CancelClass, CompleteClass, IdParam } from './bookings.schemas.ts';
 import { lockOccurrence, returnPackageClass, toBooking, toOccurrence } from './core.ts';
+import type { Tx } from '../common/sql.ts';
 
 const problem = (message: string, code: string, extra: object = {}) => ({ message, problems: [{ code, message }], ...extra });
 
@@ -19,7 +20,7 @@ export class AttendanceService {
   constructor(@Inject(DbService) private readonly db: DbService) {}
 
   /** Loads a booking and its class, class first. A coach only ever finds bookings in their own classes. */
-  private async load(c: any, rawId: string, user: AuthUser) {
+  private async load(c: Tx, rawId: string, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
     const pre = (await c.query(`SELECT b.occurrence_id AS "occurrenceId" FROM bookings b WHERE b.id = $1`, [id])).rows[0];
     if (!pre) throw new NotFoundException('Booking not found.');

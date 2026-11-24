@@ -35,5 +35,6 @@ export class AllExceptionsFilter implements ExceptionFilter {
 }
 
 function isClientError(e: unknown): e is { status: number } {
-  return typeof e === 'object' && e !== null && typeof (e as any).status === 'number' && (e as any).status >= 400 && (e as any).status < 500;
+  const status = typeof e === 'object' && e !== null ? (e as { status?: unknown }).status : undefined;
+  return typeof status === 'number' && status >= 400 && status < 500;
 }
