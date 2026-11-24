@@ -208,8 +208,9 @@ export const SCRYPT = { N: 16384, R: 8, P: 1, keyLength: 64, saltBytes: 16 } as 
 
 /** Headers and CORS rules that are the same in every environment. */
 export const CONTENT_SECURITY_POLICY = "default-src 'none'; frame-ancestors 'none'";
-export const CORS_METHODS = ['GET', 'POST', 'PATCH', 'DELETE'];
-export const CORS_HEADERS = ['authorization', 'content-type', 'x-trot-client'];
+// Every method the API uses. A method missing here is blocked by the BROWSER before the request is sent (tools like curl do not notice).
+export const CORS_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+export const CORS_HEADERS = ['authorization', 'content-type', 'x-trot-client', 'x-file-name'];
 
 /**
  * The website keeps its refresh token in a cookie that scripts cannot read. It says it is the website with this header,

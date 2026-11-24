@@ -298,6 +298,27 @@ test('CORS: a listed site is allowed, an unlisted site is not', async () => {
   assert.equal(evil.headers.get('access-control-allow-origin'), null);
 });
 
+test('CORS preflight: every method and header the website really uses is allowed, for a listed site only', async () => {
+  // A browser asks permission BEFORE sending a request that is not "simple". Tools like curl never ask, so this is only caught here.
+  const ask = (origin: string, method: string, headers: string) =>
+    api('OPTIONS', '/documents/x/file', { headers: { origin, 'access-control-request-method': method, 'access-control-request-headers': headers } });
+  for (const [method, headers] of [
+    ['GET', 'authorization,x-trot-client'], ['POST', 'authorization,content-type,x-trot-client'], ['PATCH', 'authorization,content-type'], ['DELETE', 'authorization'],
+    ['PUT', 'authorization,content-type,x-trot-client'], // assessments, notification preferences, account branches
+    ['PUT', 'authorization,content-type,x-file-name,x-trot-client'], // a document file upload
+  ] as const) {
+    const r = await ask('http://localhost:5173', method, headers);
+    assert.ok(r.status === 204 || r.status === 200, `${method} ${headers}: ${r.status}`);
+    assert.ok((r.headers.get('access-control-allow-methods') ?? '').split(',').map((s) => s.trim()).includes(method), `${method} is allowed`);
+    const allowed = (r.headers.get('access-control-allow-headers') ?? '').toLowerCase().split(',').map((s) => s.trim());
+    for (const h of headers.split(',')) assert.ok(allowed.includes(h), `${h} is allowed`);
+    assert.equal(r.headers.get('access-control-allow-credentials'), 'true');
+  }
+  const evil = await ask('https://evil.example', 'PUT', 'authorization,x-file-name');
+  assert.equal(evil.headers.get('access-control-allow-origin'), null, 'an unlisted site gets nothing');
+  assert.equal(evil.headers.get('access-control-allow-credentials'), null);
+});
+
 test('unknown routes are a clean 404 and the health route is open', async () => {
   assert.equal((await api('GET', '/does-not-exist', { token: await tokenFor(await makeAccount({ role: 'owner' })) })).status, 404);
   assert.equal((await api('GET', '/health')).status, 200);

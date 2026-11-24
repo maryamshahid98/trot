@@ -12,7 +12,7 @@ import { opts } from '../ui/pickers';
 
 interface Account { id: string; fullName: string; email: string; phone: string | null; role: string; status: string; branchIds?: string[] }
 interface Leave { id: string; staffId: string; staffName?: string; status: string; from: number; to: number; reason?: string | null }
-type F = null | 'new' | 'leave' | { role: Account } | { status: Account } | { reset: Account } | { branches: Account } | { decide: Leave } | { cancel: Leave };
+type F = null | 'new' | 'leave' | { role: Account } | { status: Account } | { reset: Account } | { mfa: Account } | { branches: Account } | { decide: Leave } | { cancel: Leave };
 
 export function Staff() {
   const { user, branches } = useAuth();
@@ -40,7 +40,7 @@ export function Staff() {
               { head: 'Name', cell: (a) => <b>{a.fullName}</b>, width: '1.4fr' }, { head: 'Email', cell: (a) => a.email, width: '1.6fr' }, { head: 'Role', cell: (a) => label(a.role), width: '0.8fr' }, { head: 'Status', cell: (a) => <Badge value={a.status} />, width: '0.8fr' },
               { head: '', width: '3.4fr', right: true, cell: (a) => a.role === 'customer' ? null : (
                 <span className="actions"><Btn small onClick={() => setF({ role: a })}>Role</Btn><Btn small onClick={() => setF({ status: a })}>Status</Btn><Btn small onClick={() => setF({ branches: a })}>Branches</Btn>
-                  <Btn small onClick={() => void act(() => post(`/accounts/${a.id}/unlock`), 'Unlocked').then((ok) => ok && reload())}>Unlock</Btn><Btn small onClick={() => setF({ reset: a })}>Reset password</Btn></span>
+                  <Btn small onClick={() => void act(() => post(`/accounts/${a.id}/unlock`), 'Unlocked').then((ok) => ok && reload())}>Unlock</Btn><Btn small onClick={() => setF({ reset: a })}>Reset password</Btn><Btn small onClick={() => setF({ mfa: a })}>Reset two-step</Btn></span>
               ) },
             ]} />}</Load>
           </Card>
@@ -62,6 +62,11 @@ export function Staff() {
       ]} onSubmit={(v) => post('/accounts', { fullName: v.fullName, email: v.email, ...(v.phone ? { phone: v.phone } : {}), role: v.role, branchIds: v.branchIds, password: v.password, locale: v.locale })} />}
       {typeof f === 'object' && f && 'role' in f && <FormDialog title={`Role: ${f.role.fullName}`} onClose={() => setF(null)} onDone={reload} initial={{ role: f.role.role }} fields={[{ name: 'role', label: 'Role', type: 'select', required: true, options: opts(ASSIGNABLE_ROLES) }, { name: 'reason', label: 'Reason', type: 'text' }]} onSubmit={(v) => post(`/accounts/${f.role.id}/role`, { role: v.role, ...(v.reason ? { reason: v.reason } : {}) })} />}
       {typeof f === 'object' && f && 'status' in f && <FormDialog title={`Status: ${f.status.fullName}`} onClose={() => setF(null)} onDone={reload} initial={{ status: f.status.status }} fields={[{ name: 'status', label: 'Status', type: 'select', required: true, options: opts(['active', 'locked']) }, { name: 'reason', label: 'Reason', type: 'text' }]} onSubmit={(v) => post(`/accounts/${f.status.id}/status`, { status: v.status, ...(v.reason ? { reason: v.reason } : {}) })} />}
+      {typeof f === 'object' && f && 'mfa' in f && (
+        <Confirm title={`Reset two-step sign-in: ${f.mfa.fullName}`} danger onClose={() => setF(null)} onDone={reload}
+          text="For someone who lost their phone and their recovery codes. Their authenticator and recovery codes are removed and their sign-ins end. If their role must use two-step sign-in, they set it up again next time they sign in."
+          action={() => post(`/accounts/${f.mfa.id}/mfa/reset`)} />
+      )}
       {typeof f === 'object' && f && 'reset' in f && <FormDialog title={`New password: ${f.reset.fullName}`} onClose={() => setF(null)} onDone={reload} fields={[{ name: 'newPassword', label: 'New password', type: 'password', required: true, hint: 'At least 12 characters. All their sessions are signed out.' }]} onSubmit={(v) => post(`/accounts/${f.reset.id}/reset-password`, { newPassword: v.newPassword })} />}
       {typeof f === 'object' && f && 'branches' in f && <FormDialog title={`Branches: ${f.branches.fullName}`} onClose={() => setF(null)} onDone={reload} initial={{ branchIds: f.branches.branchIds ?? [] }} fields={[{ name: 'branchIds', label: 'Branches', type: 'checks', options: branchOpts }]} onSubmit={(v) => api('PUT', `/accounts/${f.branches.id}/branches`, { branchIds: v.branchIds })} />}
       {f === 'leave' && <FormDialog title="Request leave" onClose={() => setF(null)} onDone={reload} fields={[{ name: 'from', label: 'From', type: 'datetime', required: true }, { name: 'to', label: 'To', type: 'datetime', required: true }, { name: 'reason', label: 'Reason', type: 'text' }]} onSubmit={(v) => post('/staff-leave', { from: zonedToIso(String(v.from)), to: zonedToIso(String(v.to)), ...(v.reason ? { reason: v.reason } : {}) })} />}

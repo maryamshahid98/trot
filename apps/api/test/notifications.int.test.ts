@@ -59,6 +59,18 @@ describe('messages that follow what people do', () => {
     assert.equal((await events(f.id)).at(-1), 'booking.cancelled');
   });
 
+  test('a refund tells the family how much, and why', async () => {
+    const f = await family();
+    const b = await book(f.token, await classIn(32, { priceMinor: 11500 }), f.riderId);
+    await api('POST', `/bookings/${b.body.id}/payment`, { token: reception.token, body: { method: 'cash', amountMinor: 11500 } });
+    const receipt = (await ctx.admin.query(`SELECT id FROM receipts WHERE for_booking_id = $1`, [b.body.id])).rows[0].id;
+    assert.equal((await api('POST', `/receipts/${receipt}/adjustments`, { token: manager.token, body: { kind: 'refund', amountMinor: 5000, reason: 'Class cut short' } })).status, 201);
+    const m = (await rows(f.id)).find((x) => x.event === 'payment.refunded');
+    assert.ok(m, 'told');
+    assert.match(m.subject, /Refund processed: SAR 50\.00/);
+    assert.match(m.body, /Class cut short/);
+  });
+
   test('a package booking says confirmed, and the times are on the branch clock (Riyadh, UTC+3)', async () => {
     const f = await family();
     const pack = await makePackage(f.riderId, { balance: 3, branchId: branch });
@@ -318,7 +330,7 @@ describe('who can see and change what', () => {
 describe('the words', () => {
   const ctxEn = { locale: 'en' as const, timeZone: 'Asia/Riyadh', currency: 'SAR' };
   test('every event has a subject and a body, in plain text, and Arabic falls back to English until it is translated', () => {
-    const events = ['booking.confirmed', 'booking.pending_payment', 'payment.received', 'booking.cancelled', 'class.cancelled', 'waitlist.offered', 'class.reminder', 'package.low_balance', 'package.expiring', 'document.expiring', 'incident.escalated', 'assessment.decided'] as const;
+    const events = ['booking.confirmed', 'booking.pending_payment', 'payment.received', 'payment.refunded', 'booking.cancelled', 'class.cancelled', 'waitlist.offered', 'class.reminder', 'package.low_balance', 'package.expiring', 'document.expiring', 'incident.escalated', 'assessment.decided'] as const;
     for (const e of events) {
       const r = render(e, { riderName: 'Amal', title: 'Jumping', startsAt: '2026-12-03T06:00:00.000Z', amountMinor: 12000, receiptNumber: 'R-1', balance: 1, severity: 'high', reference: 'abcd1234' }, ctxEn);
       assert.ok(r.subject.length > 3 && r.body.length > 10, e);

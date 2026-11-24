@@ -11,7 +11,7 @@ interface Message {
 }
 const STATUSES = ['queued', 'sending', 'sent', 'failed', 'skipped'];
 const EVENT_LABELS: Record<string, string> = {
-  'booking.confirmed': 'Booking confirmed', 'booking.pending_payment': 'Place held', 'payment.received': 'Receipt', 'booking.cancelled': 'Booking cancelled',
+  'booking.confirmed': 'Booking confirmed', 'booking.pending_payment': 'Place held', 'payment.received': 'Receipt', 'payment.refunded': 'Refund', 'booking.cancelled': 'Booking cancelled',
   'class.cancelled': 'Class cancelled', 'waitlist.offered': 'Waitlist offer', 'class.reminder': 'Class reminder', 'package.low_balance': 'Package low',
   'package.expiring': 'Package expiring', 'document.expiring': 'Document expiring', 'incident.escalated': 'Incident', 'assessment.decided': 'Assessment',
 };

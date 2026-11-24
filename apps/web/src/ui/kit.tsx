@@ -54,7 +54,7 @@ export const Btn = ({ children, onClick, kind = 'plain', small, disabled, type =
   <button type={type} className={`btn2 ${kind}${small ? ' small' : ''}`} onClick={onClick} disabled={disabled}>{children}</button>
 );
 const TONES: Record<string, string> = {
-  sent: 'good', queued: 'warn', sending: 'warn', failed: 'bad',
+  sent: 'good', queued: 'warn', sending: 'warn', failed: 'bad', paid: 'good', issued: 'warn', voided: 'bad', passed: 'good', below: 'bad',
   confirmed: 'good', active: 'good', available: 'good', verified: 'good', approved: 'good', completed: 'good', published: 'good', closed: 'good', checked_in: 'good',
   pending_office_payment: 'warn', pending: 'warn', requested: 'warn', draft: 'warn', pending_review: 'warn', resting: 'warn', frozen: 'warn', submitted: 'warn', open: 'warn', medium: 'warn',
   cancelled: 'bad', no_show: 'bad', rejected: 'bad', suspended: 'bad', injured: 'bad', medical_hold: 'bad', expired: 'bad', locked: 'bad', critical: 'bad', high: 'bad', reopened: 'bad',

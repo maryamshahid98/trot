@@ -28,6 +28,7 @@ export const HTTP = { UNAUTHORIZED: 401 } as const;
 
 export const PATH = {
   LOGIN: '/login',
+  SECURITY: '/security',
   DASHBOARD: '/',
   CALENDAR: '/calendar',
   BOOKINGS: '/bookings',
@@ -53,6 +54,7 @@ export const NAV = [
   { key: 'progress', path: PATH.PROGRESS, icon: 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z', roles: [ROLE.COACH, ...MANAGERS] },
   { key: 'comms', path: PATH.COMMS, icon: 'M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4', roles: MANAGERS },
   { key: 'reports', path: PATH.REPORTS, icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2', roles: MANAGERS },
+  { key: 'security', path: PATH.SECURITY, icon: 'M12 3l8 3v6c0 4.5-3.2 8.2-8 9-4.8-.8-8-4.5-8-9V6zM9 12l2 2 4-4', roles: ALL_STAFF },
   { key: 'admin', path: PATH.ADMIN, icon: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3', roles: MANAGERS },
 ] as const;
 export type NavKey = (typeof NAV)[number]['key'];

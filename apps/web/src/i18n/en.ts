@@ -3,13 +3,15 @@ export const en = {
   appName: 'Trot',
   nav: {
     dashboard: 'Dashboard', calendar: 'Calendar', bookings: 'Bookings', people: 'People', horses: 'Horses',
-    staff: 'Staff', money: 'Money', progress: 'Progress', comms: 'Comms', reports: 'Reports', admin: 'Admin',
+    staff: 'Staff', money: 'Money', progress: 'Progress', comms: 'Comms', reports: 'Reports', admin: 'Admin', security: 'Security',
   },
   login: {
     title: 'Sign in', subtitle: 'Club staff portal', identifier: 'Email or phone', password: 'Password',
     submit: 'Sign in', working: 'Signing in…', staffOnly: 'This portal is for club staff. Please use the Trot app.',
     failed: 'Sign-in failed. Check your details and try again.', tooMany: 'Too many attempts. Wait a minute and try again.',
     offline: 'Cannot reach the server. Check that the API is running.',
+    codeTitle: 'Enter your code', codeHelp: 'Open your authenticator app and enter the 6-digit code for Trot.', code: 'Code', useRecovery: 'Lost your phone? Use a recovery code', useApp: 'Use the app code instead',
+    recoveryCode: 'Recovery code', verify: 'Continue', codeFailed: 'That code is not right. Try the newest code, or use a recovery code.', expired: 'That took too long. Please sign in again.', back: 'Start again',
   },
   shell: {
     search: 'Search riders by name', searchLabel: 'Search riders', menu: 'Menu', skip: 'Skip to content', branch: 'Branch', signOut: 'Sign out', theme: 'Change theme',

@@ -8,6 +8,7 @@ export type NotifyEvent =
   | 'booking.confirmed'
   | 'booking.pending_payment'
   | 'payment.received'
+  | 'payment.refunded'
   | 'booking.cancelled'
   | 'class.cancelled'
   | 'waitlist.offered'
@@ -26,6 +27,7 @@ export const EVENT_KIND: Record<NotifyEvent, 'essential' | 'reminder'> = {
   'booking.confirmed': 'essential',
   'booking.pending_payment': 'essential',
   'payment.received': 'essential',
+  'payment.refunded': 'essential',
   'booking.cancelled': 'essential',
   'class.cancelled': 'essential',
   'waitlist.offered': 'essential',
@@ -73,6 +75,10 @@ const EN: Record<NotifyEvent, Template> = {
   'payment.received': (d, c) => ({
     subject: `Receipt ${text(d.receiptNumber)}`,
     body: `Hello,\n\nThank you. We received ${money(d.amountMinor, c)} for ${text(d.riderName, 'your rider')}: ${text(d.title)} on ${when(d.startsAt, c)}.\n\nReceipt number: ${text(d.receiptNumber)}. The booking is confirmed.`,
+  }),
+  'payment.refunded': (d, c) => ({
+    subject: `Refund processed: ${money(d.amountMinor, c)}`,
+    body: `Hello,\n\nWe have refunded ${money(d.amountMinor, c)} to ${text(d.riderName, 'your account')}${d.reason ? ` (${text(d.reason)})` : ''}.\n\nIt may take a few days to show with your bank if it was paid by card.`,
   }),
   'booking.cancelled': (d, c) => ({
     subject: `Booking cancelled: ${text(d.title)}`,

@@ -156,6 +156,7 @@ export class PaymentsService {
           [r.branchId, id, r.riderId, b.kind, b.amountMinor, b.reason, user.id, isManager ? user.id : null],
         )
       ).rows[0];
+      if (b.kind === ADJUSTMENT_KIND.REFUND) await queueForRider(c, r.riderId, { event: 'payment.refunded', branchId: r.branchId, dedupeKey: `adjustment:${adj.id}:refund`, data: { amountMinor: b.amountMinor, reason: b.reason } });
       // A refund or a credit is also a credit note against the invoice that receipt paid.
       if (b.kind === ADJUSTMENT_KIND.REFUND || b.kind === ADJUSTMENT_KIND.CREDIT) await issueCreditNote(c, { receiptId: id, adjustmentId: adj.id, amountMinor: b.amountMinor, reason: b.reason, userId: user.id });
       await writeAudit(c, user, r.branchId, AUDIT.ADJUSTMENT_CREATE, ENTITY.ADJUSTMENT, adj.id, { receiptId: id, kind: b.kind, amountMinor: b.amountMinor, reason: b.reason });

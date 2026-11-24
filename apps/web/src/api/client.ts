@@ -5,7 +5,7 @@ export interface Problem { field: string; message: string }
 export class ApiError extends Error {
   constructor(public status: number, message: string, public problems: Problem[] = []) { super(message); }
 }
-export interface SessionUser { id: string; role: Role; fullName: string | null; locale?: string; theme?: string; branchIds: string[] }
+export interface SessionUser { id: string; role: Role; fullName: string | null; locale?: string; theme?: string; branchIds: string[]; mfaEnabled?: boolean; mfaEnrollmentRequired?: boolean }
 interface LoginResult { accessToken: string; expiresIn: number; user: SessionUser }
 
 // The access token lives only in memory. The refresh token is an HttpOnly cookie the browser sends by itself,
@@ -73,8 +73,20 @@ export async function fetchFile(path: string): Promise<{ blob: Blob; type: strin
 export const get = <T,>(path: string) => api<T>('GET', path);
 export const post = <T,>(path: string, body?: unknown) => api<T>('POST', path, body ?? {});
 
-export async function login(identifier: string, password: string): Promise<SessionUser> {
+/** The password was right: either the person is in, or a code from their authenticator app is still needed (mfaToken carries the first step). */
+export type LoginOutcome = { user: SessionUser } | { mfaToken: string };
+export async function login(identifier: string, password: string): Promise<LoginOutcome> {
   const res = await raw('POST', '/auth/login', { identifier, password }, null);
+  if (!res.ok) throw await toError(res);
+  const d = (await res.json()) as LoginResult & { mfaRequired?: boolean; mfaToken?: string };
+  if (d.mfaRequired && d.mfaToken) return { mfaToken: d.mfaToken };
+  accessToken = d.accessToken;
+  return { user: d.user };
+}
+
+/** The second step: a code from the app, or a recovery code. */
+export async function loginWithCode(mfaToken: string, entry: { code?: string; recoveryCode?: string }): Promise<SessionUser> {
+  const res = await raw('POST', '/auth/mfa/verify', { mfaToken, ...entry }, null);
   if (!res.ok) throw await toError(res);
   const d = (await res.json()) as LoginResult;
   accessToken = d.accessToken;

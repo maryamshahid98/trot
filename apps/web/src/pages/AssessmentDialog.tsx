@@ -55,7 +55,7 @@ export function AssessmentDialog({ id, onClose, onChanged }: { id: string; onClo
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     setError(null);
     const worked = await act(async () => { try { await fn(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); throw e; } }, ok);
-    if (worked) onChanged();
+    if (worked) { q.reload(); onChanged(); }
   };
 
   return (

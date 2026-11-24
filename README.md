@@ -4,7 +4,7 @@ Trot is a management system for an equestrian club: classes, riders, horses, pac
 web portal, a customer mobile app and a staff mobile app, all sharing one backend. The requirements come from the club's
 BRD (`Equestrian_Club_Management_System_BRD_v2.0`).
 
-Right now the backend is built and tested. The portal and the mobile apps are the next step.
+The backend and the staff web portal are built and tested. The mobile apps are the next step.
 
 ## What's in here
 
@@ -23,14 +23,19 @@ Right now the backend is built and tested. The portal and the mobile apps are th
 |---|---|
 | Booking rules (`packages/domain`) | Written and tested. |
 | Database | Core schema, a limited role for the API with branch isolation, and sign-in tables. |
-| API: sign-in | Log in, refresh, log out, "who am I" and change password. Accounts lock after repeated wrong passwords. |
+| API: sign-in | Log in, refresh, log out, "who am I" and change password. Accounts lock after repeated wrong passwords. Two-step sign-in with an authenticator app (recovery codes, optionally required for chosen roles, manager reset). |
 | API: schedule | List classes, and create a class with clash checks. A manager or owner can override a clash with a written reason. |
 | API: bookings | Book a class (with a package or at the office), join the waitlist when a class is full, cancel, see a class roster and my bookings. Uses the rules in `packages/domain` inside a transaction that locks the class. |
 | API: packages, office payments, receipts, adjustments | Price list, selling packages, class balance history, adjustments and freezes, paying at the desk, receipts with VAT, refunds with limits. Needs migration `0004_receipt_numbers.sql`. |
 | API: attendance, class lifecycle, waitlist offers | Check-in, no-show, complete or cancel a class, waitlist offers with a 2-hour answer window, lapsed office holds. |
 | API: riders, documents, guardians | Sign-up of riders and children, document submit and verify, approval, level, guardians. |
 | API: horses, incidents, rides, reports, admin, background jobs | Horse assignment, incident log, ride types, reports, accounts/branches/arenas/leave admin, and a job that releases expired holds and offers. |
-| Admin web portal (`apps/web`) | In progress. |
+| API: recurring classes | Weekly series (every 1 to 4 weeks, same clock time across clock changes), all-or-nothing or skip-the-clashes, cancel the whole series. |
+| API: rider documents | Scans and photos (PDF, JPEG, PNG) with every viewing audited. |
+| API: messages | Queued with the change that causes them, sent with retries, email now (log or SMTP), reminders, a delivery log. SMS and push are not built in. |
+| API: skills, assessments, level history | A level changes only by an approved assessment (a second person approves) or a manager's written correction; the history is kept for good. |
+| API: invoices, credit notes, account statements | Numbered invoices and credit notes with VAT kept as it was that day, and a running account per rider. |
+| Admin web portal (`apps/web`) | Working for the front desk and managers: schedule (with repeats), bookings, people (documents, account, progress), money (invoices), progress and assessments, messages, security. Responsive, with light and dark themes. |
 | Mobile apps | Not started. |
 
 ## Checks
