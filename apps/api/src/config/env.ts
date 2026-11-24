@@ -20,7 +20,7 @@ const flag = (fallback: boolean) =>
 const text = (fallback: string) => z.preprocess(blankIsUnset, z.string().min(1).default(fallback));
 const optionalText = (min: number) => z.preprocess(blankIsUnset, z.string().min(min, `must be at least ${min} characters`).optional());
 const postgresUrl = z
-  .string({ required_error: 'is required' })
+  .string({ error: (i) => (i.input === undefined ? 'is required' : undefined) })
   .refine((s) => /^postgres(ql)?:\/\/.+/.test(s), 'must be a postgres:// connection URL');
 
 const RuntimeEnv = z.object({
@@ -34,7 +34,7 @@ const RuntimeEnv = z.object({
   COOKIE_SECURE: flag(false), // set to true wherever the site runs on https (always in production): the cookie then never travels over plain http
 
   JWT_SECRET: z
-    .string({ required_error: 'is required' })
+    .string({ error: (i) => (i.input === undefined ? 'is required' : undefined) })
     .min(32, 'must be at least 32 characters. Generate one with: node -e "console.log(require(\'crypto\').randomBytes(48).toString(\'base64url\'))"'),
   JWT_ISSUER: text('trot'),
   JWT_AUDIENCE: text('trot-api'),
