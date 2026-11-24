@@ -51,7 +51,7 @@ export const NAV = [
   { key: 'staff', path: PATH.STAFF, icon: 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM4 21a8 8 0 0 1 16 0', roles: MANAGERS },
   { key: 'money', path: PATH.MONEY, icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v10M9.5 9.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4', roles: FRONT },
   { key: 'progress', path: PATH.PROGRESS, icon: 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z', roles: [ROLE.COACH, ...MANAGERS] },
-  { key: 'comms', path: PATH.COMMS, icon: 'M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4', roles: FRONT },
+  { key: 'comms', path: PATH.COMMS, icon: 'M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4', roles: MANAGERS },
   { key: 'reports', path: PATH.REPORTS, icon: 'M4 20V10M10 20V4M16 20v-7M22 20H2', roles: MANAGERS },
   { key: 'admin', path: PATH.ADMIN, icon: 'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM12 2v3M12 19v3M2 12h3M19 12h3', roles: MANAGERS },
 ] as const;

@@ -7,6 +7,7 @@ import { BookingsModule } from './bookings/bookings.module.ts';
 import { AdminModule } from './admin/admin.module.ts';
 import { IncidentsModule } from './incidents/incidents.module.ts';
 import { JobsModule } from './jobs/jobs.module.ts';
+import { NotificationsModule } from './notifications/notifications.controller.ts';
 import { ReportsModule } from './reports/reports.module.ts';
 import { RidesModule } from './rides/rides.module.ts';
 import { HorsesModule } from './horses/horses.module.ts';
@@ -22,7 +23,7 @@ import { ScheduleModule } from './schedule/schedule.module.ts';
 import type { ApiRequest, ApiResponse } from './common/http.ts';
 
 @Module({
-  imports: [ConfigModule, DbModule, CommonModule, AuthModule, ScheduleModule, BookingsModule, RidersModule, PaymentsModule, HorsesModule, AdminModule, JobsModule, ReportsModule, IncidentsModule, RidesModule],
+  imports: [ConfigModule, DbModule, CommonModule, AuthModule, ScheduleModule, BookingsModule, RidersModule, PaymentsModule, HorsesModule, AdminModule, JobsModule, ReportsModule, IncidentsModule, RidesModule, NotificationsModule],
   controllers: [HealthController],
   providers: [
     // Guards run in this order: first the per-address ceiling, then the sign-in check.

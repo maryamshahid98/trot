@@ -6,6 +6,7 @@ import type { Booking, Occurrence, Policy, Reason, Rider } from '@trot/domain';
 import { dayKeyFor, epochMs } from '../common/sql.ts';
 import type { Row, Tx } from '../common/sql.ts';
 import { writeAudit } from '../common/audit.ts';
+import { queueForRider } from '../notifications/outbox.ts';
 import {
   AUDIT, BOOKING_STATUS, DOC_KIND, DOC_STATUS, ENTITY, LEDGER_REASON, OCCURRENCE_STATUS, PACKAGE_STATUS, PAY_WITH, PROBLEM, RIDE_FORMAT, WAITLIST_STATUS,
 } from '../config/constants.ts';
@@ -221,6 +222,7 @@ export async function promoteWaitlist(c: Tx, occ: Occurrence & { branchId: strin
     if (ev.kind !== 'checked' || ev.reasons.length > 0) continue;
     const expires = new Date(now + policy.waitlistOfferMinutes * MS.minute).toISOString();
     await c.query(`UPDATE waitlist_entries SET status = $2, offered_at = $4::timestamptz, offer_expires_at = $3::timestamptz WHERE id = $1`, [w.id, WAITLIST_STATUS.OFFERED, expires, iso]);
+    await queueForRider(c, w.riderId, { event: 'waitlist.offered', branchId: occ.branchId, occurrenceId: occ.id, dedupeKey: `waitlist:${w.id}:offered:${expires}`, data: { offerExpiresAt: expires } });
     await writeAudit(c, actor, occ.branchId, AUDIT.WAITLIST_OFFER, ENTITY.WAITLIST_ENTRY, w.id, { occurrenceId: occ.id, riderId: w.riderId, expiresAt: expires });
     made.push({ entryId: w.id, riderId: w.riderId });
     free--;

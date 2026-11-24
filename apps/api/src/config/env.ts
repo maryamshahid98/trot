@@ -59,6 +59,25 @@ const RuntimeEnv = z.object({
   // Where uploaded rider documents are kept, and the largest file accepted. Use a folder that is backed up and survives a restart.
   UPLOAD_DIR: text('./data/uploads'),
   UPLOAD_MAX_BYTES: int(1_024, 26_214_400, 5_242_880),
+
+  // Messages. "log" writes a line to the log instead of sending (development); "off" sends nothing and records the message as skipped.
+  NOTIFY_EMAIL: z.preprocess(blankIsUnset, z.enum(['log', 'smtp', 'off']).default('log')),
+  NOTIFY_SMS: z.preprocess(blankIsUnset, z.enum(['log', 'off']).default('off')),
+  SMTP_HOST: optionalText(1),
+  SMTP_PORT: int(1, 65535, 587),
+  SMTP_SECURE: flag(false), // true for a connection that starts encrypted (usually port 465)
+  SMTP_USER: optionalText(1),
+  SMTP_PASS: optionalText(1),
+  EMAIL_FROM: optionalText(3), // for example: Trot Club <no-reply@club.example>
+  REMINDER_HOURS: int(1, 168, 24), // a class reminder goes out when the class is this many hours away
+  LOW_BALANCE_CLASSES: int(1, 20, 2), // warn when a package has this many classes or fewer left
+  PACKAGE_EXPIRY_NOTICE_DAYS: int(1, 60, 7),
+  DOCUMENT_EXPIRY_NOTICE_DAYS: int(1, 90, 14),
+}).superRefine((e, ctx) => {
+  if (e.NOTIFY_EMAIL === 'smtp') {
+    if (!e.SMTP_HOST) ctx.addIssue({ code: 'custom', path: ['SMTP_HOST'], message: 'is required when NOTIFY_EMAIL=smtp' });
+    if (!e.EMAIL_FROM) ctx.addIssue({ code: 'custom', path: ['EMAIL_FROM'], message: 'is required when NOTIFY_EMAIL=smtp' });
+  }
 });
 
 export interface AppConfig {
@@ -78,6 +97,16 @@ export interface AppConfig {
   http: { corsOrigins: string[]; trustProxy: number; hstsMaxAgeSeconds: number };
   jobs: { intervalSeconds: number };
   uploads: { dir: string; maxBytes: number };
+  notifications: {
+    email: 'log' | 'smtp' | 'off';
+    sms: 'log' | 'off';
+    smtp: { host: string; port: number; secure: boolean; user?: string; pass?: string } | null;
+    from: string | null;
+    reminderHours: number;
+    lowBalanceClasses: number;
+    packageExpiryNoticeDays: number;
+    documentExpiryNoticeDays: number;
+  };
 }
 
 function fail(what: string, error: z.ZodError): never {
@@ -110,6 +139,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     jobs: { intervalSeconds: e.JOBS_INTERVAL_SECONDS },
     uploads: { dir: e.UPLOAD_DIR, maxBytes: e.UPLOAD_MAX_BYTES },
+    notifications: {
+      email: e.NOTIFY_EMAIL, sms: e.NOTIFY_SMS,
+      smtp: e.SMTP_HOST ? { host: e.SMTP_HOST, port: e.SMTP_PORT, secure: e.SMTP_SECURE, user: e.SMTP_USER, pass: e.SMTP_PASS } : null,
+      from: e.EMAIL_FROM ?? null,
+      reminderHours: e.REMINDER_HOURS, lowBalanceClasses: e.LOW_BALANCE_CLASSES,
+      packageExpiryNoticeDays: e.PACKAGE_EXPIRY_NOTICE_DAYS, documentExpiryNoticeDays: e.DOCUMENT_EXPIRY_NOTICE_DAYS,
+    },
   };
 }
 

@@ -123,3 +123,20 @@ test('uploaded documents go to ./data/uploads with a 5 MB limit unless told othe
   assert.match(messageOf(() => loadConfig(withEnv({ UPLOAD_MAX_BYTES: '99999999999' }))), /UPLOAD_MAX_BYTES/);
   assert.equal(loadConfig(withEnv({ UPLOAD_DIR: '', UPLOAD_MAX_BYTES: '' })).uploads.maxBytes, 5_242_880, 'blank means the default');
 });
+
+test('messages: email is logged and SMS is off by default; sending real email needs a host and a from-address', () => {
+  const c = loadConfig(withEnv());
+  assert.equal(c.notifications.email, 'log');
+  assert.equal(c.notifications.sms, 'off');
+  assert.equal(c.notifications.smtp, null);
+  assert.equal(c.notifications.reminderHours, 24);
+  assert.equal(c.notifications.lowBalanceClasses, 2);
+  const msg = messageOf(() => loadConfig(withEnv({ NOTIFY_EMAIL: 'smtp' })));
+  assert.match(msg, /SMTP_HOST/);
+  assert.match(msg, /EMAIL_FROM/);
+  const ok = loadConfig(withEnv({ NOTIFY_EMAIL: 'smtp', SMTP_HOST: 'smtp.example.invalid', EMAIL_FROM: 'Trot <no-reply@club.example>', SMTP_PORT: '465', SMTP_SECURE: 'true', SMTP_USER: 'u', SMTP_PASS: 'p' }));
+  assert.deepEqual(ok.notifications.smtp, { host: 'smtp.example.invalid', port: 465, secure: true, user: 'u', pass: 'p' });
+  assert.equal(ok.notifications.from, 'Trot <no-reply@club.example>');
+  assert.match(messageOf(() => loadConfig(withEnv({ NOTIFY_EMAIL: 'carrier-pigeon' }))), /NOTIFY_EMAIL/);
+  assert.match(messageOf(() => loadConfig(withEnv({ REMINDER_HOURS: '0' }))), /REMINDER_HOURS/);
+});

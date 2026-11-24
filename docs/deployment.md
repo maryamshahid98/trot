@@ -68,6 +68,25 @@ only keeps where each one is and a fingerprint of its contents.
 - Reception, managers, owners and the rider's own family can open a file. Every opening is recorded in the audit log.
 - **Files are not scanned for viruses.** If that matters to the club, scan on upload in front of the API.
 
+## Messages (email)
+
+Bookings, payments, cancellations, waitlist offers, class reminders, expiring packages and documents, and serious incidents each
+queue a message. A message is saved **in the same transaction** as the change that caused it, then sent by the background job
+(`JOBS_INTERVAL_SECONDS`, default 60) and retried after 2, 4, 8 and 16 minutes before it is marked failed. Managers see all of this
+under **Messages** in the portal and can send now or try a failed message again.
+
+- Set `NOTIFY_EMAIL=smtp` with `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS` and `EMAIL_FROM` to send real email.
+  The default `log` only writes the recipient (masked) and subject to the log, so nothing is sent from a development machine by accident.
+  **In production, make sure it is `smtp`**, or customers receive nothing.
+- Use a sender address the provider has verified (SPF and DKIM set up for the club's domain), or messages land in spam.
+- Messages never contain medical details. An incident message carries only its severity and a reference.
+- Essential messages (confirmations, receipts, cancellations, waitlist offers) are always sent. Reminders respect each person's
+  choices (`PUT /notifications/preferences`, for the mobile apps).
+- Arabic recipients currently receive the English text. Translations are added in `apps/api/src/notifications/templates.ts`
+  once the club decides who approves them (BRD open decision OD-09).
+- **SMS and push are not built in.** The message is recorded as `skipped`. Adding a provider means one class in
+  `apps/api/src/notifications/providers.ts`; nothing else changes.
+
 ## Health check
 
 `GET /health` answers `200` when the database is reachable and `503` when it is not. The image already has a Docker

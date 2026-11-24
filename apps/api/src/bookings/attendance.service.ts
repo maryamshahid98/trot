@@ -10,6 +10,7 @@ import {
   AUDIT, BOOKING_STATUS, ENTITY, FLOW_PROBLEM, LIMITS, OCCURRENCE_STATUS, PAY_WITH, RIDER_STATUS, ROLE, WAITLIST_STATUS,
 } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
+import { queueForRider } from '../notifications/outbox.ts';
 import { CancelClass, CompleteClass, IdParam } from './bookings.schemas.ts';
 import { lockOccurrence, returnPackageClass, toBooking, toOccurrence } from './core.ts';
 import type { Tx } from '../common/sql.ts';
@@ -144,13 +145,14 @@ export class AttendanceService {
         throw new ConflictException(problem(`A ${occRow.status} class cannot be cancelled.`, FLOW_PROBLEM.CLASS_NOT_CANCELLABLE));
       }
       const bookings = (
-        await c.query(`SELECT id, status, pay_with AS "payWith", rider_package_id AS "packageId" FROM bookings WHERE occurrence_id = $1 AND status = ANY($2::booking_status[]) FOR UPDATE`, [
+        await c.query(`SELECT id, rider_id AS "riderId", status, pay_with AS "payWith", rider_package_id AS "packageId" FROM bookings WHERE occurrence_id = $1 AND status = ANY($2::booking_status[]) FOR UPDATE`, [
           id, [BOOKING_STATUS.PENDING_OFFICE_PAYMENT, BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN],
         ])
       ).rows;
       let returned = 0;
       for (const b of bookings) {
         await c.query(`UPDATE bookings SET status = $2, cancelled_at = now(), cancel_cause = $3, consumed_class = false WHERE id = $1`, [b.id, BOOKING_STATUS.CANCELLED, cause]);
+        await queueForRider(c, b.riderId, { event: 'class.cancelled', branchId: occRow.branchId, occurrenceId: id, dedupeKey: `booking:${b.id}:class_cancelled`, data: { reason } });
         // An unpaid office booking never spent a class, so there is nothing to give back.
         if (b.payWith === PAY_WITH.PACKAGE && b.packageId && b.status !== BOOKING_STATUS.PENDING_OFFICE_PAYMENT) {
           await returnPackageClass(c, b.packageId, b.id, user.id);

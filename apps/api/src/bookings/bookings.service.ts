@@ -9,6 +9,7 @@ import {
   AUDIT, BOOKING_SOURCE, BOOKING_STATUS, CANCEL_CAUSE, ENTITY, LIMITS, OCCURRENCE_STATUS, PG_ERROR, PROBLEM, ROLE, WAITLIST_STATUS,
 } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
+import { queueForRider } from '../notifications/outbox.ts';
 import { CancelBooking, CreateBooking, IdParam, RosterQuery } from './bookings.schemas.ts';
 import {
   evaluate, expireStaleHolds, insertBooking, LIVE, lockOccurrence, promoteWaitlist, returnPackageClass, toBooking, toOccurrence,
@@ -63,6 +64,10 @@ export class BookingsService {
 
         const ins = await insertBooking(c, { branchId: occ.branchId, occurrenceId: occ.id, riderId: b.riderId, status: placement, payWith: b.payWith, packageId: b.packageId, source, userId: user.id, now, policy });
         await writeAudit(c, user, occ.branchId, AUDIT.BOOKING_CREATE, ENTITY.BOOKING, ins.id, { occurrenceId: b.occurrenceId, riderId: b.riderId, payWith: b.payWith, status: placement });
+        await queueForRider(c, b.riderId, {
+          event: placement === BOOKING_STATUS.PENDING_OFFICE_PAYMENT ? 'booking.pending_payment' : 'booking.confirmed', branchId: occ.branchId, occurrenceId: occ.id,
+          dedupeKey: `booking:${ins.id}:created`, data: { amountMinor: occ.priceMinor, holdMinutes: policy.officeHoldMinutes },
+        });
         return { id: ins.id, status: placement, holdExpiresAt: ins.holdExpiresAt };
       });
     } catch (e: unknown) {
@@ -102,6 +107,7 @@ export class BookingsService {
       if (!decision.allowed) throw new ConflictException({ message: decision.reason, problems: [{ code: PROBLEM.CANNOT_CANCEL, message: decision.reason }] });
       await c.query(`UPDATE bookings SET status = $2, cancelled_at = now(), cancel_cause = $3, consumed_class = $4 WHERE id = $1`, [id, BOOKING_STATUS.CANCELLED, cause, decision.consumesClass]);
       if (decision.returnsPackageClass && row.packageId) await returnPackageClass(c, row.packageId, id, user.id);
+      await queueForRider(c, row.riderId, { event: 'booking.cancelled', branchId: row.branchId, occurrenceId: row.occurrenceId, dedupeKey: `booking:${id}:cancelled`, data: { byClub: cause === CANCEL_CAUSE.CLUB } });
       await writeAudit(c, user, row.branchId, AUDIT.BOOKING_CANCEL, ENTITY.BOOKING, id, { cause, consumedClass: decision.consumesClass, returnedToPackage: decision.returnsPackageClass });
 
       // The freed place goes to the next person waiting.

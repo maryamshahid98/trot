@@ -8,6 +8,7 @@ import { loadPolicy } from '../common/policy.ts';
 import { parse } from '../common/validate.ts';
 import { ADJUSTMENT_KIND, AUDIT, BOOKING_STATUS, ENTITY, PAYMENT_PROBLEM, ROLE } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
+import { queueForRider } from '../notifications/outbox.ts';
 import { ConfirmUnpaid, CreateAdjustment, IdParam, ListReceipts, RecordPayment } from './payments.schemas.ts';
 import { issueReceipt } from './receipts.ts';
 import type { Row, Tx } from '../common/sql.ts';
@@ -56,6 +57,10 @@ export class PaymentsService {
       // A free class has nothing to receipt.
       const receipt = price > 0 ? await issueReceipt(c, { branchId: booking.branchId, riderId: booking.riderId, amountMinor: price, method: b.method, bookingId: id, userId: user.id }) : null;
       await c.query(`UPDATE bookings SET status = $2, hold_expires_at = NULL WHERE id = $1`, [id, BOOKING_STATUS.CONFIRMED]);
+      await queueForRider(c, booking.riderId, {
+        event: receipt ? 'payment.received' : 'booking.confirmed', branchId: booking.branchId, occurrenceId: booking.occurrenceId,
+        dedupeKey: `booking:${id}:paid`, data: { receiptNumber: receipt?.number ?? null, amountMinor: price },
+      });
       await writeAudit(c, user, booking.branchId, AUDIT.PAYMENT_RECORD, ENTITY.BOOKING, id, { amountMinor: price, method: b.method, receipt: receipt?.number ?? null });
       return { id, status: BOOKING_STATUS.CONFIRMED, receipt };
     });
