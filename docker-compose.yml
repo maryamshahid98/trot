@@ -1,0 +1,15 @@
+services:
+  db:
+    image: postgres:16
+    container_name: trot-db
+    environment:
+      POSTGRES_USER: trot          # superuser, used only by the migration runner
+      POSTGRES_PASSWORD: trot
+      POSTGRES_DB: trot
+    ports:
+      - "5432:5432"
+    volumes:
+      - trot-data:/var/lib/postgresql/data
+    # The database starts EMPTY. Create the tables with: npm run db:migrate (in apps/api).
+volumes:
+  trot-data:
