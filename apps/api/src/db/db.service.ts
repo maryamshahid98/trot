@@ -81,6 +81,26 @@ export class DbService implements OnModuleDestroy {
     return this.withBranches(c, rows.map((r) => r.id as string), fn);
   }
 
+  /**
+   * Runs fn only if no other server is already holding this lock (a Postgres advisory lock, shared by every API instance
+   * that uses the same database). Returns undefined, without running fn, when someone else holds it.
+   * The lock belongs to one connection and is released when fn ends, or if this server dies.
+   */
+  async withAdvisoryLock<T>(key: number, fn: () => Promise<T>): Promise<T | undefined> {
+    const c = await this.pool.connect();
+    try {
+      const got = (await c.query('SELECT pg_try_advisory_lock($1) AS ok', [key])).rows[0].ok as boolean;
+      if (!got) return undefined;
+      try {
+        return await fn();
+      } finally {
+        await c.query('SELECT pg_advisory_unlock($1)', [key]);
+      }
+    } finally {
+      c.release();
+    }
+  }
+
   async onModuleDestroy() {
     await this.pool.end();
   }

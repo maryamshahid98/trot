@@ -165,6 +165,10 @@ export async function insertBooking(
   p: { branchId: string; occurrenceId: string; riderId: string; status: string; payWith: 'package' | 'office'; packageId?: string; source: string; userId: string; now: number; policy: Policy },
 ): Promise<{ id: string; holdExpiresAt: string | null }> {
   const holdExpiresAt = p.status === BOOKING_STATUS.PENDING_OFFICE_PAYMENT ? new Date(p.now + p.policy.officeHoldMinutes * MS.minute).toISOString() : null;
+  // Lock the package first. Inserting the booking takes a shared lock on it (the foreign key), and the ledger guard then asks for an
+  // exclusive one: two bookings on the same package would each hold the shared lock and wait for the other, and the database
+  // would end one of them with a deadlock error. Taking the exclusive lock up front makes them queue instead.
+  if (p.payWith === PAY_WITH.PACKAGE) await c.query(`SELECT 1 FROM rider_packages WHERE id = $1 FOR UPDATE`, [p.packageId]);
   const ins = (
     await c.query(
       `INSERT INTO bookings (branch_id, occurrence_id, rider_id, status, pay_with, rider_package_id, source, created_by, hold_expires_at)

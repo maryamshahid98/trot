@@ -1,5 +1,7 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import pg from 'pg';
+import { DbService } from '../src/db/db.service.ts';
 import { ctx, makeBranch, randomDay, startApp, stopApp } from './helpers.ts';
 import { balanceOf, HOUR, makeClass, makePackage, readyRider } from './booking-helpers.ts';
 import { auditActions, customer, directBooking, post, staff, statusOf } from './flow-helpers.ts';
@@ -16,6 +18,29 @@ const addWaiting = async (occurrenceId: string, riderId: string, o: { status?: s
     `INSERT INTO waitlist_entries (occurrence_id, rider_id, status, offered_at, offer_expires_at) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
     [occurrenceId, riderId, o.status ?? 'active', o.offerExpiresInMin === undefined ? null : new Date().toISOString(), o.offerExpiresInMin === undefined ? null : new Date(Date.now() + o.offerExpiresInMin * 60_000).toISOString()],
   )).rows[0].id;
+
+describe('several servers', () => {
+  test('only one server at a time holds the background-job lock', async () => {
+    const db = ctx.app.get(DbService) as DbService;
+    const key = 987_654_321; // a key of its own, so this test never touches the real job's lock
+    let ranInner: boolean | undefined;
+    const outer = await db.withAdvisoryLock(key, async () => {
+      // A second server tries while the first still holds the lock: it must be told to skip, not wait or run.
+      const other = new pg.Pool({ connectionString: process.env.TEST_ADMIN_DATABASE_URL });
+      try {
+        const c = await other.connect();
+        ranInner = (await c.query('SELECT pg_try_advisory_lock($1) AS ok', [key])).rows[0].ok;
+        c.release();
+      } finally {
+        await other.end();
+      }
+      return 'ran';
+    });
+    assert.equal(outer, 'ran');
+    assert.equal(ranInner, false, 'the second connection must not get the lock while the first holds it');
+    assert.equal(await db.withAdvisoryLock(key, async () => 'again'), 'again', 'the lock is released afterwards');
+  });
+});
 
 describe('who can run the job', () => {
   test('no token is refused; only managers and owners may run it', async () => {

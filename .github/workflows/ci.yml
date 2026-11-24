@@ -35,6 +35,7 @@ jobs:
       TEST_ADMIN_DATABASE_URL: postgres://trot:trot@localhost:5432/trot_test
       TEST_DATABASE_URL: postgres://trot_app:ci_app_password@localhost:5432/trot_test
       APP_DB_PASSWORD: ci_app_password
+      SEED_PASSWORD: ci_seed_password_123
 
     steps:
       - uses: actions/checkout@v4

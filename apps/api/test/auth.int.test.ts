@@ -2,8 +2,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SignJWT } from 'jose';
-import { RateLimitGuard } from '../src/auth/rate-limit.guard.ts';
-import { api, appConfig, ctx, login, makeAccount, PASSWORD, startApp, stopApp, tokenFor } from './helpers.ts';
+import { api, appConfig, ctx, login, resetRateLimits, makeAccount, PASSWORD, startApp, stopApp, tokenFor } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -89,14 +88,45 @@ test('failures and sign-ins are written to the audit log', async () => {
 test('sign-in routes are rate limited per address', async () => {
   const original = appConfig().rateLimit.authMax;
   appConfig().rateLimit.authMax = 3;
-  RateLimitGuard.reset();
+  await resetRateLimits();
   try {
     const codes: number[] = [];
     for (let i = 0; i < 5; i++) codes.push((await login('nobody@trot-test.invalid')).status);
     assert.deepEqual(codes, [401, 401, 401, 429, 429]);
   } finally {
     appConfig().rateLimit.authMax = original;
-    RateLimitGuard.reset();
+    await resetRateLimits();
+  }
+});
+
+test('every route has a general per-address limit, and the health check is exempt', async () => {
+  const original = appConfig().rateLimit.generalMax;
+  appConfig().rateLimit.generalMax = 3;
+  await resetRateLimits();
+  try {
+    const codes: number[] = [];
+    for (let i = 0; i < 5; i++) codes.push((await api('GET', '/auth/me')).status);
+    assert.deepEqual(codes, [401, 401, 401, 429, 429]);
+    assert.equal((await api('GET', '/health')).status, 200, 'the load balancer must never be rate limited');
+  } finally {
+    appConfig().rateLimit.generalMax = original;
+    await resetRateLimits();
+  }
+});
+
+test('the limit is kept in the database, so a second server sees the same count', async () => {
+  const original = appConfig().rateLimit.authMax;
+  appConfig().rateLimit.authMax = 2;
+  await resetRateLimits();
+  try {
+    await login('nobody@trot-test.invalid');
+    await login('nobody@trot-test.invalid');
+    // Another API server would add to the same row. Simulate it by adding the third hit straight in the table.
+    await ctx.admin.query(`UPDATE rate_limits SET hits = hits + 1 WHERE key LIKE '%auth|%'`);
+    assert.equal((await login('nobody@trot-test.invalid')).status, 429);
+  } finally {
+    appConfig().rateLimit.authMax = original;
+    await resetRateLimits();
   }
 });
 

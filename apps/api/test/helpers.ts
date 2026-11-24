@@ -17,6 +17,8 @@ if (need('TEST_DATABASE_URL') === process.env.DATABASE_URL) throw new Error('TES
 process.env.DATABASE_URL = need('TEST_DATABASE_URL');
 process.env.JWT_SECRET = 'test-secret-test-secret-test-secret-1234';
 process.env.JOBS_INTERVAL_SECONDS = '0'; // the tests run the background job by hand, never on a timer
+process.env.RATE_LIMIT_KEY_PREFIX = `test-${process.pid}|`; // test files run side by side on one database: each keeps its own counters
+process.env.GENERAL_RATE_LIMIT = '10000000'; // the general-limit test lowers this for itself
 process.env.AUTH_RATE_LIMIT = '100000'; // the rate-limit test lowers this for itself
 process.env.CORS_ORIGINS = 'http://localhost:5173'; // the CORS test checks one listed and one unlisted site
 
@@ -28,6 +30,9 @@ export const ctx = { app: undefined as any, base: '', admin: undefined as unknow
 
 /** Settings are read once when the app starts, so a test that needs a different value changes the running app's config. */
 export const appConfig = () => ctx.app.get(APP_CONFIG) as AppConfig;
+
+/** Clears this test process's rate-limit counters (and only those, other test files are running at the same time). */
+export const resetRateLimits = () => ctx.admin.query('DELETE FROM rate_limits WHERE key LIKE $1', [`${process.env.RATE_LIMIT_KEY_PREFIX}%`]);
 
 export async function startApp() {
   ctx.admin = new pg.Pool({ connectionString: need('TEST_ADMIN_DATABASE_URL') });
