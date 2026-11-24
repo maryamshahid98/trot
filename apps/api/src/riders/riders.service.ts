@@ -115,7 +115,7 @@ export class RidersService {
           [branchId, q.q ? likePattern(q.q) : null, q.status ?? null, q.limit, q.offset],
         )
       ).rows;
-      return { total: rows[0]?.total ?? 0, riders: rows.map(({ total, ...r }: any) => r) };
+      return { total: rows[0]?.total ?? 0, riders: rows.map(({ total: _total, ...r }: any) => r) };
     });
   }
 

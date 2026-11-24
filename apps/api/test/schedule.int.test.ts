@@ -8,7 +8,7 @@ let day = 0;
 let arenaId = '';
 let coach: { id: string; email: string };
 let coach2: { id: string; email: string };
-let tokens: Record<string, string> = {};
+const tokens: Record<string, string> = {};
 let otherBranch = '';
 let otherBranchManagerToken = '';
 
