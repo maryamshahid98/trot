@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { api, BRANCH, ctx, makeBranch, randomDay, startApp, stopApp } from './helpers.ts';
 import { balanceOf, codes, DAY, HOUR, makeClass, makeRider, readyRider } from './booking-helpers.ts';
 import { auditActions, customer, post, staff, statusOf } from './flow-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -34,12 +35,12 @@ describe('package types: the price list', () => {
     const c = await customer();
     const cust = await get('/package-types?includeInactive=true', c.token);
     assert.equal(cust.status, 200);
-    const ids = cust.body.packageTypes.map((t: any) => t.id);
+    const ids = cust.body.packageTypes.map((t: Json) => t.id);
     assert.ok(ids.includes(active) && !ids.includes(retired), 'customers never see retired types, even if they ask');
     const rec = await staff();
-    assert.ok((await get('/package-types', rec.token)).body.packageTypes.every((t: any) => t.active));
-    assert.ok((await get('/package-types?includeInactive=true', rec.token)).body.packageTypes.some((t: any) => t.id === retired));
-    assert.deepEqual((await get('/package-types', rec.token)).body.packageTypes.find((t: any) => t.id === active).classFormats, ['group']);
+    assert.ok((await get('/package-types', rec.token)).body.packageTypes.every((t: Json) => t.active));
+    assert.ok((await get('/package-types?includeInactive=true', rec.token)).body.packageTypes.some((t: Json) => t.id === retired));
+    assert.deepEqual((await get('/package-types', rec.token)).body.packageTypes.find((t: Json) => t.id === active).classFormats, ['group']);
   });
 
   test('list: bad input and a branch the user does not work in', async () => {
@@ -175,7 +176,7 @@ describe('selling a package at the desk', () => {
     const b = await post('/bookings', c.token, { occurrenceId: occ, riderId: c.riderId, payWith: 'package', packageId: sold.body.id });
     assert.equal(b.status, 201, b.text);
     const led = await get(`/packages/${sold.body.id}/ledger`, rec.token);
-    assert.deepEqual(led.body.entries.map((e: any) => e.reason), ['purchase', 'use']);
+    assert.deepEqual(led.body.entries.map((e: Json) => e.reason), ['purchase', 'use']);
     assert.equal(led.body.balance, 1);
   });
 });
@@ -361,7 +362,7 @@ describe('receipts', () => {
     const byRider = await get(`/receipts?riderId=${a.riderId}`, rec.token);
     assert.equal(byRider.status, 200);
     assert.deepEqual([byRider.body.total, byRider.body.receipts[0].number], [1, a.number]);
-    assert.ok((await get('/receipts?method=bank_transfer', rec.token)).body.receipts.every((r: any) => r.method === 'bank_transfer'));
+    assert.ok((await get('/receipts?method=bank_transfer', rec.token)).body.receipts.every((r: Json) => r.method === 'bank_transfer'));
     assert.equal((await get('/receipts?from=2999-01-01', rec.token)).body.total, 0);
     assert.ok((await get('/receipts?limit=1', rec.token)).body.receipts.length === 1);
     for (const qs of ['limit=0', 'limit=999', 'offset=-1', 'method=gold', 'from=yesterday', 'riderId=x', 'branchId=x']) assert.equal((await get(`/receipts?${qs}`, rec.token)).status, 400, qs);
@@ -374,7 +375,7 @@ describe('receipts', () => {
     await paidReceipt();
     const r = await get('/receipts/mine', mine.token);
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.receipts.map((x: any) => x.number), [mine.number]);
+    assert.deepEqual(r.body.receipts.map((x: Json) => x.number), [mine.number]);
     assert.equal((await get('/receipts/mine', (await staff()).token)).status, 403);
     assert.equal((await get(`/receipts/${mine.receiptId}`, mine.token)).status, 200);
     assert.equal((await get(`/receipts/${mine.receiptId}`, (await customer()).token)).status, 404);
@@ -407,7 +408,7 @@ describe('POST /receipts/:id/adjustments', () => {
     const big = await post(`/receipts/${id}/adjustments`, mgr.token, { kind: 'credit', amountMinor: 60000, reason: 'Goodwill credit' });
     assert.equal(big.body.approved, true);
     const view = await get(`/receipts/${id}`, mgr.token);
-    assert.deepEqual(view.body.adjustments.map((a: any) => [a.kind, a.amountMinor, a.approvedBy === null]), [['refund', 10000, true], ['credit', 60000, false]]);
+    assert.deepEqual(view.body.adjustments.map((a: Json) => [a.kind, a.amountMinor, a.approvedBy === null]), [['refund', 10000, true], ['credit', 60000, false]]);
     assert.deepEqual(await auditActions(small.body.id), ['adjustment.create']);
   });
 

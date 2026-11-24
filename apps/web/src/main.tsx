@@ -5,6 +5,7 @@ import { App } from './App';
 import { AuthProvider } from './auth/AuthContext';
 import { ToastProvider } from './ui/kit';
 import { applyTheme, readTheme } from './ui/theme';
+import './fonts';
 import './theme.css';
 
 applyTheme(readTheme());

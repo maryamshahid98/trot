@@ -9,14 +9,12 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     rules: {
-      // The API leans on `any` for Express request objects and pg rows. Visible as warnings so it can be reduced over time.
-      '@typescript-eslint/no-explicit-any': 'warn',
+      // No `any` anywhere. The one exception is the documented `Json` type that the tests use for API responses.
+      '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
     },
   },
   { files: ['apps/api/**/*.ts', 'packages/**/*.ts', '*.mjs'], languageOptions: { globals: globals.node } },
-  // The API source is fully typed: a new `any` there fails the build. Tests and the web app keep it as a warning.
-  { files: ['apps/api/src/**/*.ts'], rules: { '@typescript-eslint/no-explicit-any': 'error' } },
   {
     files: ['apps/web/**/*.{ts,tsx}'],
     languageOptions: { globals: globals.browser },

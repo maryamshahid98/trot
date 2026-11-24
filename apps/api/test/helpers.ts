@@ -26,7 +26,14 @@ export const BRANCH = '00000000-0000-0000-0000-0000000000b1';
 const ORG = '00000000-0000-0000-0000-000000000001';
 export const PASSWORD = 'Correct-horse-9';
 
-export const ctx = { app: undefined as any, base: '', admin: undefined as unknown as pg.Pool };
+/**
+ * What the API sends back is untyped JSON, and the point of a test is to assert on its shape. So tests read responses as `Json`.
+ * This is the one place the project says so; everything else, including all of apps/api/src, is fully typed.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Json = any;
+
+export const ctx = { app: undefined as Json, base: '', admin: undefined as unknown as pg.Pool };
 
 /** Settings are read once when the app starts, so a test that needs a different value changes the running app's config. */
 export const appConfig = () => ctx.app.get(APP_CONFIG) as AppConfig;
@@ -81,7 +88,7 @@ export async function api(method: string, path: string, opts: { token?: string; 
   if (body !== undefined) headers['content-type'] ??= 'application/json';
   const res = await fetch(ctx.base + path, { method, headers, body });
   const text = await res.text();
-  let json: any;
+  let json: Json;
   try { json = JSON.parse(text); } catch { json = undefined; }
   return { status: res.status, body: json, text, headers: res.headers };
 }

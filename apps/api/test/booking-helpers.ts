@@ -1,5 +1,6 @@
 // Builders for the booking tests. They write straight to the database as the superuser, so a test's setup never depends on the API under test.
 import { BRANCH, ctx, makeAccount } from './helpers.ts';
+import type { Json } from './helpers.ts';
 
 export const HOUR = 3_600_000;
 export const DAY = 86_400_000;
@@ -80,4 +81,4 @@ export const balanceOf = async (packageId: string): Promise<number> =>
 export const liveBookings = async (occurrenceId: string): Promise<number> =>
   Number((await ctx.admin.query(`SELECT count(*)::int AS n FROM bookings WHERE occurrence_id = $1 AND status IN ('pending_office_payment','confirmed','checked_in','completed')`, [occurrenceId])).rows[0].n);
 
-export const codes = (res: { body: any }): string[] => (res.body?.problems ?? []).map((p: any) => p.code);
+export const codes = (res: { body: Json }): string[] => (res.body?.problems ?? []).map((p: Json) => p.code);

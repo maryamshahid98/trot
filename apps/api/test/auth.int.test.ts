@@ -2,6 +2,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SignJWT } from 'jose';
+import type { Json } from './helpers.ts';
 import { api, appConfig, ctx, login, resetRateLimits, makeAccount, PASSWORD, startApp, stopApp, tokenFor } from './helpers.ts';
 
 before(startApp);
@@ -51,7 +52,7 @@ test('bad input is a 400, not a crash: missing fields, huge password, wrong type
   assert.equal((await api('POST', '/auth/login', { body: {} })).status, 400);
   assert.equal((await api('POST', '/auth/login', { body: { identifier: 'a@b.invalid', password: 'x'.repeat(5000) } })).status, 400);
   assert.equal((await api('POST', '/auth/login', { body: { identifier: 123, password: ['a'] } })).status, 400);
-  assert.equal((await api('POST', '/auth/login', { body: null as any })).status, 400);
+  assert.equal((await api('POST', '/auth/login', { body: null as Json })).status, 400);
 });
 
 test('SQL-injection style input is just a failed login', async () => {
@@ -82,7 +83,7 @@ test('failures and sign-ins are written to the audit log', async () => {
   await login(a.email, 'Wrong-password-1');
   await login(a.email);
   const r = await ctx.admin.query(`SELECT action FROM audit_log WHERE actor_account_id = $1 ORDER BY id`, [a.id]);
-  assert.deepEqual(r.rows.map((x: any) => x.action), ['auth.login_failed', 'auth.login']);
+  assert.deepEqual(r.rows.map((x) => x.action), ['auth.login_failed', 'auth.login']);
 });
 
 test('sign-in routes are rate limited per address', async () => {

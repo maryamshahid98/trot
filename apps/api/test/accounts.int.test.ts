@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { api, BRANCH, ctx, login, makeAccount, makeBranch, PASSWORD, randomDay, startApp, stopApp } from './helpers.ts';
 import { codes, HOUR, makeClass } from './booking-helpers.ts';
 import { auditActions, customer, post, staff } from './flow-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -16,7 +17,7 @@ const phone = () => `+9665${String(Date.now()).slice(-6)}${String(n++).padStart(
 const NEW_PW = 'Fresh-pass-77';
 const body = (o: Record<string, unknown> = {}) => ({ fullName: 'New Person', email: email(), role: 'coach', branchIds: [BRANCH], password: NEW_PW, ...o });
 const row = async (id: string) => (await ctx.admin.query(`SELECT * FROM accounts WHERE id = $1`, [id])).rows[0];
-const branchesOf = async (id: string): Promise<string[]> => (await ctx.admin.query(`SELECT branch_id FROM account_branches WHERE account_id = $1 ORDER BY 1`, [id])).rows.map((r: any) => r.branch_id);
+const branchesOf = async (id: string): Promise<string[]> => (await ctx.admin.query(`SELECT branch_id FROM account_branches WHERE account_id = $1 ORDER BY 1`, [id])).rows.map((r) => r.branch_id);
 
 describe('who may manage accounts', () => {
   test('no token is refused, and only managers and owners may use these routes', async () => {
@@ -97,7 +98,7 @@ describe('seeing accounts', () => {
     const find = async (who: { email: string }) => {
       const res = await get(`/accounts?q=${encodeURIComponent(who.email)}`, manager.token);
       assert.equal(res.status, 200);
-      return res.body.accounts.map((a: any) => a.id) as string[];
+      return res.body.accounts.map((a: Json) => a.id) as string[];
     };
     assert.deepEqual(await find(mine), [mine.id]);
     assert.deepEqual(await find(cust), [cust.id]);

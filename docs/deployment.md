@@ -91,8 +91,7 @@ docker run -p 8080:8080 trot-web
 - The image already gives every page the right security headers (a Content-Security-Policy that allows calls only to the
   API address, no framing, no sniffing), caches the hashed files for a year, never caches the page itself, and sends
   addresses such as `/calendar` to the app so refreshing works. `GET /healthz` answers `ok` for a load balancer.
-- The site loads its fonts from Google Fonts. If the club's network or privacy rules do not allow that, the fonts need
-  to be hosted locally first (and the Content-Security-Policy in `apps/web/nginx/default.conf.template` updated).
+- The fonts are part of the site, so nothing is loaded from a third party.
 
 You can also skip the image: `npm --workspace @trot/web run build`, then upload `apps/web/dist` to any static host. That host
 must send unknown addresses to `index.html` and should set the same headers.

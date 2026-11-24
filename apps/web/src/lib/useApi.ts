@@ -1,27 +1,30 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ApiError, get } from '../api/client';
 
 export interface Query<T> { data: T | null; error: string | null; loading: boolean; reload: () => void }
 
 /** Loads a path whenever it changes. Pass null to wait (for example until a branch is chosen). */
 export function useQuery<T>(path: string | null): Query<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(path !== null);
   const [tick, setTick] = useState(0);
-  const latest = useRef(0);
+  // The latest answer, and which request it answers. While a newer request is running the older data stays on screen.
+  const [result, setResult] = useState<{ key: string; data: T | null; error: string | null } | null>(null);
+  const key = path === null ? null : `${path}#${tick}`;
   useEffect(() => {
-    if (path === null) { setData(null); setLoading(false); return; }
-    const id = ++latest.current;
-    setLoading(true);
-    setError(null);
+    if (key === null || path === null) return;
+    let current = true; // a slower, older request must not overwrite a newer one
     get<T>(path)
-      .then((d) => { if (id === latest.current) setData(d); })
-      .catch((e: unknown) => { if (id === latest.current) setError(e instanceof ApiError ? e.message : 'Cannot reach the server.'); })
-      .finally(() => { if (id === latest.current) setLoading(false); });
-  }, [path, tick]);
+      .then((data) => { if (current) setResult({ key, data, error: null }); })
+      .catch((e: unknown) => { if (current) setResult((r) => ({ key, data: r?.data ?? null, error: e instanceof ApiError ? e.message : 'Cannot reach the server.' })); });
+    return () => { current = false; };
+  }, [key, path]);
   const reload = useCallback(() => setTick((n) => n + 1), []);
-  return { data, error, loading, reload };
+  const answered = key !== null && result?.key === key;
+  return {
+    data: key === null ? null : (result?.data ?? null),
+    error: answered ? result.error : null,
+    loading: key !== null && !answered,
+    reload,
+  };
 }
 
 export const qs = (params: Record<string, string | number | boolean | null | undefined>): string => {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { api, BRANCH, ctx, makeArena, makeBranch, randomDay, startApp, stopApp, tokenFor, makeAccount } from './helpers.ts';
 import { codes, DAY, HOUR, makeClass, readyRider } from './booking-helpers.ts';
 import { auditActions, directBooking, post, staff } from './flow-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -93,7 +94,7 @@ describe('horse list, create and edit', () => {
     assert.equal((await post(`/horses/${id}/status`, other.token, { status: 'resting', reason: 'x' })).status, 404);
     const mine = await get('/horses', other.token);
     assert.equal(mine.status, 200);
-    assert.ok(!mine.body.horses.some((h: any) => h.id === id));
+    assert.ok(!mine.body.horses.some((h: Json) => h.id === id));
   });
 
   test('list filters by status and by name, and treats % as a letter', async () => {
@@ -102,9 +103,9 @@ describe('horse list, create and edit', () => {
     const a = await makeHorse({ name: `${marker} one` });
     const b = await makeHorse({ name: `${marker} two`, status: 'resting' });
     const byName = await get(`/horses?q=${encodeURIComponent(marker)}`, manager.token);
-    assert.deepEqual(byName.body.horses.map((h: any) => h.id).sort(), [a, b].sort());
+    assert.deepEqual(byName.body.horses.map((h: Json) => h.id).sort(), [a, b].sort());
     const resting = await get(`/horses?q=${encodeURIComponent(marker)}&status=resting`, manager.token);
-    assert.deepEqual(resting.body.horses.map((h: any) => h.id), [b]);
+    assert.deepEqual(resting.body.horses.map((h: Json) => h.id), [b]);
     assert.equal((await get('/horses?q=%25', manager.token)).body.horses.length, 0);
     assert.equal((await get('/horses?status=flying', manager.token)).status, 400);
   });
@@ -161,7 +162,7 @@ describe('horse status', () => {
     assert.equal((await post(`/schedule/${occurrenceId}/horses`, manager.token, { horseId: horse, riderId })).status, 201);
     const res = await post(`/horses/${horse}/status`, hand.token, { status: 'medical_hold', reason: 'Vet check' });
     assert.equal(res.status, 201);
-    assert.deepEqual(res.body.affectedClasses.map((c: any) => c.occurrenceId), [occurrenceId]);
+    assert.deepEqual(res.body.affectedClasses.map((c: Json) => c.occurrenceId), [occurrenceId]);
     assert.equal(await assignmentCount(horse), 1);
     const back = await post(`/horses/${horse}/status`, hand.token, { status: 'available' });
     assert.deepEqual(back.body.affectedClasses, []);
@@ -220,7 +221,7 @@ describe('giving a horse to a class', () => {
     assert.equal(res.status, 201);
     assert.equal(res.body.overridden, false);
     const list = await get(`/schedule/${occurrenceId}/horses`, reception.token);
-    assert.deepEqual(list.body.assignments.map((a: any) => [a.horseId, a.riderId]), [[horse, riderId]]);
+    assert.deepEqual(list.body.assignments.map((a: Json) => [a.horseId, a.riderId]), [[horse, riderId]]);
     assert.deepEqual(await auditActions(res.body.id), ['horse.assign']);
     const gone = await del(`/schedule/${occurrenceId}/horses/${res.body.id}`, reception.token);
     assert.equal(gone.status, 200);
@@ -304,7 +305,7 @@ describe('giving a horse to a class', () => {
       assert.ok(codes(plain).includes(code), code);
       const forced = await post(path, manager.token, { horseId: horse, riderId, override: { reason: 'I know best' } });
       assert.equal(forced.status, 422, `${code} must not be overridable`);
-      assert.ok(forced.body.problems.every((p: any) => p.notOverridable));
+      assert.ok(forced.body.problems.every((p: Json) => p.notOverridable));
       assert.equal(await assignmentCount(horse), 0);
     }
   });
@@ -336,7 +337,7 @@ describe('giving a horse to a class', () => {
     const forced = await post(`/schedule/${fourth.occurrenceId}/horses`, manager.token, { horseId: horse, riderId: fourth.riderId, override: { reason: 'Show preparation' } });
     assert.equal(forced.status, 201);
     assert.equal(forced.body.overridden, true);
-    assert.ok(forced.body.problems.some((p: any) => p.code === 'HORSE_DAILY_LIMIT'));
+    assert.ok(forced.body.problems.some((p: Json) => p.code === 'HORSE_DAILY_LIMIT'));
     assert.deepEqual(await auditActions(forced.body.id), ['horse.assign_override']);
     const detail = (await ctx.admin.query(`SELECT detail FROM audit_log WHERE entity_id = $1`, [forced.body.id])).rows[0].detail;
     assert.equal(detail.reason, 'Show preparation');
@@ -423,10 +424,10 @@ describe('giving a horse to a class', () => {
     const retired = await approvedHorse(arenaId, { status: 'retired' });
     const res = await get(`/schedule/${occurrenceId}/horses/suggestions?riderId=${riderId}`, reception.token);
     assert.equal(res.status, 200);
-    assert.ok(res.body.suitable.some((h: any) => h.id === good));
-    const rest = res.body.unsuitable.find((h: any) => h.id === resting);
-    assert.ok(rest.problems.some((p: any) => p.code === 'HORSE_UNAVAILABLE'));
-    assert.ok(![...res.body.suitable, ...res.body.unsuitable].some((h: any) => h.id === retired));
+    assert.ok(res.body.suitable.some((h: Json) => h.id === good));
+    const rest = res.body.unsuitable.find((h: Json) => h.id === resting);
+    assert.ok(rest.problems.some((p: Json) => p.code === 'HORSE_UNAVAILABLE'));
+    assert.ok(![...res.body.suitable, ...res.body.unsuitable].some((h) => h.id === retired));
     assert.equal((await get(`/schedule/${occurrenceId}/horses/suggestions?riderId=${await readyRider()}`, reception.token)).status, 422);
     assert.equal((await get(`/schedule/${occurrenceId}/horses/suggestions`, undefined)).status, 401);
     assert.equal((await get(`/schedule/${occurrenceId}/horses/suggestions`, (await staff('stable_hand')).token)).status, 403);

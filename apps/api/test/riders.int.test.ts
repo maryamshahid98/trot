@@ -2,6 +2,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { api, BRANCH, ctx, makeAccount, makeBranch, startApp, stopApp, tokenFor, randomDay } from './helpers.ts';
 import { codes, guard, HOUR, LONG_LIVED_UNTIL, makeClass, makeRider, verifyDocs } from './booking-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -128,7 +129,7 @@ describe('POST /riders', () => {
     const c = await person('customer');
     const r = await post('/riders', c.token, { fullName: name(), dateOfBirth: ADULT, relation: 'self', medicalNotes: 'SECRET-NOTE' });
     const rows = (await ctx.admin.query(`SELECT action, detail::text AS d FROM audit_log WHERE entity_id = $1`, [r.body.id])).rows;
-    assert.deepEqual(rows.map((x: any) => x.action), ['rider.create']);
+    assert.deepEqual(rows.map((x) => x.action), ['rider.create']);
     assert.ok(!rows[0].d.includes('SECRET-NOTE'));
   });
 });
@@ -142,7 +143,7 @@ describe('reading riders', () => {
     await post('/riders', stranger.token, { fullName: 'Not mine', dateOfBirth: ADULT, relation: 'self' });
     const r = await api('GET', '/riders/mine', { token: c.token });
     assert.equal(r.status, 200);
-    assert.deepEqual(r.body.riders.map((x: any) => x.fullName).sort(), ['Kid', 'Me']);
+    assert.deepEqual(r.body.riders.map((x: Json) => x.fullName).sort(), ['Kid', 'Me']);
     assert.equal((await api('GET', '/riders/mine')).status, 401);
     assert.equal((await api('GET', '/riders/mine', { token: (await person('reception')).token })).status, 403);
   });
@@ -432,8 +433,8 @@ describe('documents', () => {
     const both = await Promise.all([post(`/documents/${fresh}/verify`, rec.token), post(`/documents/${fresh}/verify`, mgr.token)]);
     assert.deepEqual(both.map((r) => r.status).sort(), [201, 409]);
     const rows = (await ctx.admin.query(`SELECT id, status FROM rider_documents WHERE rider_id = $1 AND kind = 'medical_form'`, [f.riderId])).rows;
-    assert.equal(rows.find((r: any) => r.id === old).status, 'superseded');
-    assert.equal(rows.filter((r: any) => r.status === 'verified').length, 1);
+    assert.equal(rows.find((r) => r.id === old).status, 'superseded');
+    assert.equal(rows.filter((r) => r.status === 'verified').length, 1);
   });
 
   test('from sign-up to first booking: submit, verify, approve, then book', async () => {

@@ -2,6 +2,7 @@ import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { api, BRANCH, ctx, makeAccount, makeBranch, randomDay, startApp, stopApp, tokenFor } from './helpers.ts';
 import { balanceOf, codes, DAY, guard, HOUR, liveBookings, makeClass, makePackage, makeRider, readyRider, theCoach, verifyDocs } from './booking-helpers.ts';
+import type { Json } from './helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -458,7 +459,7 @@ describe('POST /bookings/:id/cancel', () => {
   test('every booking and cancellation is written to the audit log', async () => {
     const x = await booked({ startsAt: future(), pay: 'office' });
     await cancel(x.token, x.bookingId);
-    const actions = (await ctx.admin.query(`SELECT action FROM audit_log WHERE entity_id = $1 ORDER BY at`, [x.bookingId])).rows.map((r: any) => r.action);
+    const actions = (await ctx.admin.query(`SELECT action FROM audit_log WHERE entity_id = $1 ORDER BY at`, [x.bookingId])).rows.map((r) => r.action);
     assert.deepEqual(actions, ['booking.create', 'booking.cancel']);
   });
 });
@@ -521,7 +522,7 @@ describe('GET /bookings (roster) and GET /bookings/mine', () => {
     const r = await api('GET', '/bookings/mine', { token });
     assert.equal(r.status, 200);
     assert.equal(r.body.bookings.length, 2);
-    assert.deepEqual(new Set(r.body.bookings.map((x: any) => x.riderId)), new Set([self, ward]));
+    assert.deepEqual(new Set(r.body.bookings.map((x: Json) => x.riderId)), new Set([self, ward]));
     assert.equal(r.body.waitlist.length, 1);
     assert.equal(r.body.waitlist[0].riderId, self);
 
