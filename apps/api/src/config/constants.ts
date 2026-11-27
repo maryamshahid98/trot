@@ -47,6 +47,7 @@ export const PG_ERROR = {
   INSUFFICIENT_PRIVILEGE: '42501',
   UNIQUE_VIOLATION: '23505',
   CHECK_VIOLATION: '23514', // the ledger raises this when a balance would go below zero
+  DEADLOCK_DETECTED: '40P01',
 } as const;
 
 /** Audit log vocabulary. */
@@ -80,6 +81,7 @@ export const AUDIT = {
   BOOKING_CANCEL: 'booking.cancel',
   RIDER_CREATE: 'rider.create',
   RIDER_UPDATE: 'rider.update',
+  RIDER_MEDICAL_VIEW: 'rider.medical_view',
   RIDER_LEVEL: 'rider.level',
   RIDER_STATUS: 'rider.status',
   GUARDIAN_ADD: 'guardian.add',

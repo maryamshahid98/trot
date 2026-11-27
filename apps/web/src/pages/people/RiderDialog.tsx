@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { api, fetchFile, post, uploadFile } from '../../api/client';
 import { useAuth } from '../../auth/AuthContext';
-import { DOC_KINDS, FRONT_DESK, LEVELS, MANAGER_ROLES, PACKAGE_STATUSES_SETTABLE, OFFICE_METHODS, RIDER_STATUSES } from '../../constants';
+import { DOC_KINDS, FRONT_DESK, LEVELS, MANAGER_ROLES, NO_MEDICAL_TITLES, NO_RIDER_MONEY_TITLES, PACKAGE_STATUSES_SETTABLE, OFFICE_METHODS, RIDER_STATUSES } from '../../constants';
+import { tr } from '../../i18n';
 import type { Role } from '../../constants';
 import { useBranch } from '../../lib/branch';
 import { fmtDate, fmtDateTime, label, money, toMinor } from '../../lib/format';
@@ -53,6 +54,8 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
   const act = useAct();
   const front = FRONT_DESK.includes(role);
   const manager = MANAGER_ROLES.includes(role);
+  const medical = !NO_MEDICAL_TITLES.includes(user!.title ?? role);
+  const money_ = !NO_RIDER_MONEY_TITLES.includes(user!.title ?? role);
   const [tab, setTab] = useState<'profile' | 'guardians' | 'bookings' | 'documents' | 'packages' | 'account' | 'progress'>('profile');
   const [dlg, setDlg] = useState<Dlg>(null);
   const r = useQuery<RiderDetail>(`/riders/${riderId}`);
@@ -81,7 +84,7 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
   return (
     <Modal title={d?.fullName ?? 'Rider'} onClose={onClose} wide>
       <div className="actions" style={{ paddingBottom: 12 }}>
-        <Tabs tabs={[{ id: 'profile', label: 'Profile' }, ...(front ? [{ id: 'guardians' as const, label: 'Guardians' }] : []), { id: 'bookings', label: 'Bookings' }, { id: 'documents', label: 'Documents' }, { id: 'packages', label: 'Packages' }, ...(front ? [{ id: 'account' as const, label: 'Account' }] : []), { id: 'progress', label: 'Progress' }]} value={tab} onChange={setTab} />
+        <Tabs tabs={[{ id: 'profile', label: 'Profile' }, ...(front ? [{ id: 'guardians' as const, label: 'Guardians' }] : []), { id: 'bookings', label: 'Bookings' }, ...(medical ? [{ id: 'documents' as const, label: 'Documents' }] : []), ...(money_ ? [{ id: 'packages' as const, label: 'Packages' }] : []), ...(front && money_ ? [{ id: 'account' as const, label: 'Account' }] : []), { id: 'progress', label: 'Progress' }]} value={tab} onChange={setTab} />
       </div>
 
       {tab === 'profile' && <Load q={r}>{(x) => (
@@ -94,7 +97,7 @@ export function RiderDialog({ riderId, onClose, onChanged }: { riderId: string; 
             <dt>Born</dt><dd>{x.dateOfBirth}</dd><dt>Level</dt><dd>{label(x.level)}</dd><dt>Status</dt><dd><Badge value={x.status} /></dd>
             <dt>Walk-in</dt><dd>{x.isWalkIn ? 'Yes' : 'No'}</dd>
             <dt>Emergency contact</dt><dd>{x.emergencyContact ? `${x.emergencyContact.name}, ${x.emergencyContact.phone}` : '—'}</dd>
-            <dt>Medical notes</dt><dd>{x.medicalNotes ?? '—'}</dd><dt>Allergies</dt><dd>{x.allergies ?? '—'}</dd>
+            <dt>Medical notes</dt><dd>{medical ? x.medicalNotes ?? '—' : tr('Not shown to your role')}</dd><dt>Allergies</dt><dd>{medical ? x.allergies ?? '—' : tr('Not shown to your role')}</dd>
             <dt>Contact</dt><dd>{[x.phone, x.email].filter(Boolean).join(', ') || '—'}</dd><dt>Height and weight</dt><dd>{x.heightCm ? `${x.heightCm} cm` : '—'} / {x.weightKg ? `${x.weightKg} kg` : '—'}</dd>
             <dt>Riding experience</dt><dd>{x.ridingExperience ?? '—'}</dd><dt>Preferences</dt><dd>{x.preferences ?? '—'}</dd><dt>Restrictions</dt><dd>{x.restrictions ?? '—'}</dd>
             {(x.restrictedFrom || x.restrictedUntil) && <><dt>Booking limited</dt><dd>{x.restrictedFrom ? `from ${x.restrictedFrom} ` : ''}{x.restrictedUntil ? `until ${x.restrictedUntil}` : ''}</dd></>}

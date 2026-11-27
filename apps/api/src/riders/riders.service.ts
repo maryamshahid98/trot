@@ -143,10 +143,14 @@ export class RidersService {
 
   async get(rawId: string, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    const rider = await this.db.scoped({ branchIds: user.branchIds, role: user.role }, (c) => this.load(c, id, user));
-    // Planning and finance work does not need anyone's medical details.
-    if (user.title && NO_MEDICAL.includes(user.title)) return { ...rider, medicalNotes: null, allergies: null };
-    return rider;
+    return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+      const rider = await this.load(c, id, user);
+      // Planning and finance work does not need anyone's medical details.
+      if (user.title && NO_MEDICAL.includes(user.title)) return { ...rider, medicalNotes: null, allergies: null };
+      // Staff who are shown medical details leave a trace: who looked, at whom and when, never the text itself (BR-027).
+      if (!isCustomer(user) && (rider.medicalNotes || rider.allergies)) await writeAudit(c, user, rider.branchId, AUDIT.RIDER_MEDICAL_VIEW, ENTITY.RIDER, id, {});
+      return rider;
+    });
   }
 
   /** Every class and ride this rider has been booked into, newest first, with how it ended. */
@@ -156,13 +160,15 @@ export class RidersService {
       await this.load(c, id, user, 'r.id');
       const bookings = (
         await c.query(
-          `SELECT b.id, b.number, b.status, b.attendance, b.lesson_outcome AS "outcome", b.instructor_notes AS "notes",
+          `SELECT b.id, b.number, b.status, b.attendance, b.lesson_outcome AS "outcome",
+                  -- The instructor's own notes are for the club. The family sees the outcome and the skills.
+                  CASE WHEN $2::boolean THEN NULL ELSE b.instructor_notes END AS "notes",
                   (SELECT h.name FROM horses h WHERE h.id = b.actual_horse_id) AS "actualHorse",
                   (SELECT string_agg(k.name, ', ' ORDER BY k.name) FROM skills k WHERE k.id = ANY(b.skills_practised)) AS skills,
                   b.pay_with AS "payWith", b.source, b.cancel_cause AS "cancelCause", b.consumed_class AS "consumedClass", o.title, o.format, lower(o.during) AS "startsAt",
                   (SELECT string_agg(h.name, ', ' ORDER BY h.name) FROM horse_assignments a JOIN horses h ON h.id = a.horse_id WHERE a.occurrence_id = o.id AND a.rider_id = b.rider_id) AS horse
              FROM bookings b JOIN occurrences o ON o.id = b.occurrence_id WHERE b.rider_id = $1 ORDER BY lower(o.during) DESC LIMIT 200`,
-          [id],
+          [id, isCustomer(user)],
         )
       ).rows;
       return { bookings };

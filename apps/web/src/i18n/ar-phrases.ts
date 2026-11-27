@@ -2,6 +2,7 @@
 // A phrase that is not listed shows in English.
 export const AR_PHRASES: Record<string, string> = {
   "Not assigned": "لم يتم التعيين",
+  "Not shown to your role": "غير معروض لدورك",
   "Your own account": "حسابك",
   "Only a higher role can change this account": "لا يمكن تغيير هذا الحساب إلا بصلاحية أعلى",
   "You can give roles below your own.": "يمكنك منح الأدوار الأدنى من دورك.",

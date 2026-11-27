@@ -82,6 +82,9 @@ export const PACKAGE_STATUSES_SETTABLE = ['active', 'frozen', 'cancelled'] as co
 export const ASSIGNABLE_ROLES = ['coach', 'stable_hand', 'reception', 'manager', 'scheduler', 'finance', 'auditor', 'director'] as const;
 /** Who may manage whom: only people ranked below you, and only roles below your own (kept in step with ROLE_RANK in the API). */
 export const ROLE_RANK: Record<string, number> = { customer: 0, coach: 1, stable_hand: 1, reception: 1, finance: 1, scheduler: 1, auditor: 1, manager: 2, director: 2.5, owner: 3 };
+/** Titles the server refuses a rider's medical details and documents, and a rider's money (kept in step with apps/api/src/auth/titles.ts). */
+export const NO_MEDICAL_TITLES: readonly string[] = ['finance', 'scheduler', 'auditor'];
+export const NO_RIDER_MONEY_TITLES: readonly string[] = ['scheduler'];
 /** The screens a limited title sees. Ordinary roles follow each menu item's own list. */
 export const TITLE_SCREENS: Record<string, readonly string[]> = {
   scheduler: ['dashboard', 'calendar', 'bookings', 'people', 'horses', 'staff', 'security'],

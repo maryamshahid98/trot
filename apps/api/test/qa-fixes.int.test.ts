@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 import { after, before } from 'node:test';
 import { api, BRANCH, ctx, makeBranch, startApp, stopApp } from './helpers.ts';
-import { balanceOf, codes, DAY, HOUR, makeClass, makePackage, makeRider, readyRider, verifyDocs } from './booking-helpers.ts';
-import { directBooking, post, staff } from './flow-helpers.ts';
+import { balanceOf, codes, DAY, guard, HOUR, makeClass, makePackage, makeRider, readyRider, verifyDocs } from './booking-helpers.ts';
+import { customer, directBooking, post, staff } from './flow-helpers.ts';
 
 before(startApp);
 after(stopApp);
@@ -165,6 +165,64 @@ describe('the day sheet', () => {
     assert.equal(await listed(), null);
     assert.equal((await api('PUT', `/bookings/${booking}/record`, { token: m.token, body: { horseId: horse.body.id } })).status, 200);
     assert.equal(await listed(), name);
+  });
+});
+
+describe('least privilege and privacy', () => {
+  test('a title is refused the rider documents and money it has no work with, whatever the capitals', async () => {
+    const riderId = await readyRider();
+    const status = async (role: string, path: string) => (await api('GET', path, { token: (await staff(role)).token })).status;
+    for (const role of ['finance', 'scheduler', 'auditor']) {
+      assert.equal(await status(role, `/riders/${riderId}/documents`), 403, role);
+      assert.equal(await status(role, `/Riders/${riderId}/DOCUMENTS`), 403, role);
+    }
+    for (const part of ['account', 'packages', 'Account', 'packages/']) assert.equal(await status('scheduler', `/riders/${riderId}/${part}`), 403, part);
+    assert.equal(await status('scheduler', `/riders/${riderId}`), 200);
+    for (const role of ['finance', 'auditor', 'reception']) assert.equal(await status(role, `/riders/${riderId}/account`), 200, role);
+    for (const role of ['reception', 'director']) assert.equal(await status(role, `/riders/${riderId}/documents`), 200, role);
+  });
+
+  test('showing medical details to staff is recorded, without the details; a title that is not shown them leaves no entry', async () => {
+    const riderId = await readyRider();
+    await ctx.admin.query(`UPDATE riders SET medical_notes = 'asthma' WHERE id = $1`, [riderId]);
+    const views = async () => (await ctx.admin.query(`SELECT actor_account_id AS actor, detail::text AS d FROM audit_log WHERE entity_id = $1 AND action = 'rider.medical_view'`, [riderId])).rows;
+    assert.equal((await api('GET', `/riders/${riderId}`, { token: (await staff('finance')).token })).body.medicalNotes, null);
+    assert.equal((await views()).length, 0);
+    const rec = await staff('reception');
+    assert.equal((await api('GET', `/riders/${riderId}`, { token: rec.token })).body.medicalNotes, 'asthma');
+    const seen = await views();
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].actor, rec.id);
+    assert.ok(!seen[0].d.includes('asthma'));
+  });
+
+  test("the family sees a lesson's outcome but not the instructor's notes", async () => {
+    const parent = await customer();
+    const riderId = await readyRider();
+    await guard(parent.id, riderId);
+    const booking = await directBooking({ occurrenceId: await makeClass({ startsAt: Date.now() - 20 * 60000 }), riderId });
+    await ctx.admin.query(`UPDATE bookings SET lesson_outcome = 'Good seat', instructor_notes = 'Internal only' WHERE id = $1`, [booking]);
+    const family = (await api('GET', `/riders/${riderId}/history`, { token: parent.token })).body.bookings[0];
+    assert.equal(family.outcome, 'Good seat');
+    assert.equal(family.notes, null);
+    assert.equal((await api('GET', `/riders/${riderId}/history`, { token: (await staff('reception')).token })).body.bookings[0].notes, 'Internal only');
+  });
+});
+
+describe('two schedulers at once', () => {
+  test('the second is always told about the clash, never given a server error', async () => {
+    const m = await staff('manager');
+    const rec = await staff('reception');
+    const arenaId = await arena(8);
+    const coaches = [(await staff('coach')).id, (await staff('coach')).id];
+    for (let round = 0; round < 60; round++) {
+      const start = slot();
+      const body = { branchId: BRANCH, title: 'Race', arenaId, format: 'group', startsAt: iso(start), endsAt: iso(start + HOUR), capacity: 2 };
+      const two = await Promise.all([post('/schedule', m.token, { ...body, coachId: coaches[0] }), post('/schedule', rec.token, { ...body, coachId: coaches[1] })]);
+      const [first, second] = two.map((r) => r.status).sort();
+      assert.equal(first, 201, `round ${round}: ${two.map((r) => r.text).join(' / ')}`);
+      assert.ok(second === 409 || second === 422, `round ${round}: second got ${second}`);
+    }
   });
 });
 

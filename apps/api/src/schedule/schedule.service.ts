@@ -60,6 +60,12 @@ export interface RideFill {
 }
 export type PrepareRide = (c: Tx, branchId: string, spec: OccurrenceSpec) => Promise<RideFill>;
 
+/**
+ * Two people took the same arena or coach at the same moment. The database refuses the second one either as an overlap, or,
+ * when both rows went in together and each waited for the other, as a deadlock. Both mean "someone else got there first".
+ */
+const isClash = (e: unknown): boolean => ([PG_ERROR.EXCLUSION_VIOLATION, PG_ERROR.DEADLOCK_DETECTED] as string[]).includes(pgErrorCode(e) ?? '');
+
 @Injectable()
 export class ScheduleService {
   constructor(@Inject(DbService) private readonly db: DbService) {}
@@ -206,7 +212,7 @@ export class ScheduleService {
         return { id, status: next.status, changed: Object.keys(changes), horsesFreed, ridersTold: material ? booked.length : 0 };
       });
     } catch (e: unknown) {
-      if (pgErrorCode(e) === PG_ERROR.EXCLUSION_VIOLATION) throw new ConflictException('Someone else just booked that arena or coach at this time. Please check the schedule and try again.');
+      if (isClash(e)) throw new ConflictException('Someone else just booked that arena or coach at this time. Please check the schedule and try again.');
       throw e;
     }
   }
@@ -265,7 +271,7 @@ export class ScheduleService {
           await c.query('ROLLBACK TO SAVEPOINT series_slot');
           let problems: unknown[];
           if (e instanceof UnprocessableEntityException) problems = ((e.getResponse() as { problems?: unknown[] }).problems ?? []);
-          else if (pgErrorCode(e) === PG_ERROR.EXCLUSION_VIOLATION) problems = [{ code: 'CLASH', message: 'Someone else just booked that arena or coach at this time.' }];
+          else if (isClash(e)) problems = [{ code: 'CLASH', message: 'Someone else just booked that arena or coach at this time.' }];
           else throw e;
           skipped.push({ startsAt: spec.startsAt, endsAt: spec.endsAt, problems });
         }
@@ -301,7 +307,7 @@ export class ScheduleService {
       return await this.db.scoped({ branchIds: [branchId], role: user.role }, (c) => this.place(c, branchId, input, user, override, prepareRide));
     } catch (e: unknown) {
       // The database is the last line of defence if two people schedule at the same moment.
-      if (pgErrorCode(e) === PG_ERROR.EXCLUSION_VIOLATION) throw new ConflictException('Someone else just booked that arena or coach at this time. Please check the schedule and try again.');
+      if (isClash(e)) throw new ConflictException('Someone else just booked that arena or coach at this time. Please check the schedule and try again.');
       if (pgErrorCode(e) === PG_ERROR.FOREIGN_KEY_VIOLATION) throw new BadRequestException('Unknown branch, arena or coach.');
       if (pgErrorCode(e) === PG_ERROR.INSUFFICIENT_PRIVILEGE) throw new ForbiddenException('That is outside the branches you may work in.');
       throw e;
