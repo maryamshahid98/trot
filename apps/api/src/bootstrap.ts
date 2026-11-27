@@ -26,7 +26,7 @@ export function configureApp(app: INestApplication) {
 
   // A document upload is the file's own bytes (PDF, JPEG or PNG), not JSON. Only those content types are read, and only up to the size limit;
   // a bigger body is refused with 413 before it is kept in memory.
-  app.use('/documents', raw({ type: [...ALLOWED_FILE_TYPES], limit: config.uploads.maxBytes }));
+  app.use(['/documents', /^\/incidents\/[^/]+\/file$/], raw({ type: [...ALLOWED_FILE_TYPES], limit: config.uploads.maxBytes }));
 
   // Browsers may only call from the sites listed in CORS_ORIGINS. The mobile apps are not browsers and need no entry.
   // Decided per request, so only a listed site is told that cookies are allowed. An unlisted site gets no CORS headers that grant anything.

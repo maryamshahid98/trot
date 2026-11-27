@@ -15,7 +15,13 @@ const fields = {
   minAgeYears: z.number().int().min(0).max(LIMITS.rideMinAgeMax).nullable(),
   activeFrom: isoDay.nullable(),
   activeTo: isoDay.nullable(),
+  arenaId: uuid.nullable(),
+  maxRiderWeightKg: z.number().int().min(10).max(250).nullable(),
+  bookUntilHours: z.number().int().min(0).max(720).nullable(),
+  cancelHours: z.number().int().min(0).max(720).nullable(),
+  horseRequired: z.boolean(),
 };
+export const AddRate = z.object({ fromDate: isoDay, priceMinor: fields.priceMinor, durationMinutes: fields.durationMinutes });
 
 export const IdParam = z.object({ id: uuid });
 export const ListRideTypes = z.object({ branchId: uuid.optional(), includeInactive: z.enum(['true', 'false']).default('true') });
@@ -31,6 +37,11 @@ export const CreateRideType = z.object({
   minAgeYears: fields.minAgeYears.optional(),
   activeFrom: fields.activeFrom.optional(),
   activeTo: fields.activeTo.optional(),
+  arenaId: fields.arenaId.optional(),
+  maxRiderWeightKg: fields.maxRiderWeightKg.optional(),
+  bookUntilHours: fields.bookUntilHours.optional(),
+  cancelHours: fields.cancelHours.optional(),
+  horseRequired: fields.horseRequired.optional(),
 });
 
 export const UpdateRideType = z

@@ -1,7 +1,7 @@
 import type { ReactElement } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { useAuth } from './auth/AuthContext';
-import { NAV, PATH } from './constants';
+import { menuFor, PATH } from './constants';
 import { Shell } from './layout/Shell';
 import { Logo } from './ui/Logo';
 import { t } from './i18n';
@@ -29,7 +29,7 @@ export function App() {
   if (!ready) return <div className="boot" role="status" aria-label={t.shell.loading}><Logo size={34} /><span className="spinner" aria-hidden="true" /></div>;
   // When the club requires two-step sign-in and it is not set up yet, the Security screen is the only one there is.
   const mustSetUp = user?.mfaEnrollmentRequired === true;
-  const allowed = NAV.filter((n) => user && (n.roles as readonly string[]).includes(user.role) && (!mustSetUp || n.key === 'security'));
+  const allowed = (user ? menuFor(user.role, user.title) : []).filter((n) => !mustSetUp || n.key === 'security');
   return (
     <Routes>
       <Route path={PATH.LOGIN} element={<Login />} />

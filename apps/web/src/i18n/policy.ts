@@ -8,7 +8,7 @@ export const POLICY_TEXT: Record<string, { label: string; hint: string }> = {
   horseMaxSessionsPerDay: { label: 'Most sessions per horse per day', hint: '' },
   horseMaxSessionsPerWeek: { label: 'Most sessions per horse per week', hint: '' },
   horseMinRestBetweenMinutes: { label: 'Rest between a horse’s sessions (minutes)', hint: '' },
-  adjustmentManagerThresholdMinor: { label: 'Refund amount a manager may approve (halalas)', hint: 'Owner only. Larger amounts need an owner.' },
+  adjustmentManagerThresholdMinor: { label: 'Largest refund reception may record (SAR)', hint: 'Owner only. Larger amounts need an owner.' },
   lateCancelConsumesClass: { label: 'Late cancellation uses up the class', hint: '' },
   noShowConsumesClass: { label: 'No-show uses up the class', hint: '' },
   allowManagerUnpaidConfirmation: { label: 'Managers may confirm a rider without payment', hint: 'Owner only.' },

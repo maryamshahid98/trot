@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { NAV, PATH } from '../constants';
+import { menuFor, PATH } from '../constants';
 import { t } from '../i18n';
 import { Icon } from '../ui/Icon';
+import { LanguageButton } from '../ui/LanguageButton';
 import { Logo } from '../ui/Logo';
 import { toggleTheme } from '../ui/theme';
 
@@ -16,7 +17,7 @@ export function Shell() {
   const { user, branches, branchId, setBranchId, signOut } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const items = NAV.filter((n) => user && (n.roles as readonly string[]).includes(user.role) && (!user.mfaEnrollmentRequired || n.key === 'security'));
+  const items = (user ? menuFor(user.role, user.title) : []).filter((n) => !user?.mfaEnrollmentRequired || n.key === 'security');
   // The search looks riders up, so only people who can open the People screen get it.
   const canSearch = items.some((n) => n.key === 'people');
   const [term, setTerm] = useState('');
@@ -73,6 +74,7 @@ export function Shell() {
             branches[0] && <span className="chip">{branches[0].name}</span>
           )}
           <button className="chip round" aria-label={t.shell.theme} onClick={toggleTheme}><Icon d={SUN} size={20} /></button>
+          <LanguageButton />
           <button className="chip" onClick={() => void signOut()}>{t.shell.signOut}</button>
         </div>
         <main id="content" className="content" tabIndex={-1}>

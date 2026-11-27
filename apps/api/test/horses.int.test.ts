@@ -191,13 +191,12 @@ describe('workload view', () => {
 });
 
 describe('giving a horse to a class', () => {
-  test('no token, customers, and stable hands cannot plan; a coach sees only their own class', async () => {
+  test('no token and customers cannot plan; a coach sees only their own class', async () => {
     const { occurrenceId, riderId, arenaId } = await classWithRider(randomDay() + 8 * HOUR);
     const horse = await approvedHorse(arenaId);
     assert.equal((await post(`/schedule/${occurrenceId}/horses`, undefined, { horseId: horse, riderId })).status, 401);
     const customerAcct = await makeAccount({ role: 'customer', branchIds: [BRANCH] });
     assert.equal((await post(`/schedule/${occurrenceId}/horses`, await tokenFor(customerAcct), { horseId: horse, riderId })).status, 403);
-    assert.equal((await post(`/schedule/${occurrenceId}/horses`, (await staff('stable_hand')).token, { horseId: horse, riderId })).status, 403);
     const strangerCoach = await staff('coach');
     assert.equal((await post(`/schedule/${occurrenceId}/horses`, strangerCoach.token, { horseId: horse, riderId })).status, 404);
     const ownerCoachId = (await ctx.admin.query(`SELECT coach_id FROM occurrences WHERE id = $1`, [occurrenceId])).rows[0].coach_id;
@@ -381,7 +380,7 @@ describe('giving a horse to a class', () => {
 
   test('a finished, cancelled or already started class cannot be changed', async () => {
     const reception = await staff('reception');
-    for (const status of ['completed', 'cancelled', 'draft']) {
+    for (const status of ['completed', 'cancelled']) {
       const occurrenceId = await makeClass({ startsAt: randomDay() + 8 * HOUR, status });
       const riderId = await readyRider();
       await directBooking({ occurrenceId, riderId });
@@ -430,6 +429,6 @@ describe('giving a horse to a class', () => {
     assert.ok(![...res.body.suitable, ...res.body.unsuitable].some((h) => h.id === retired));
     assert.equal((await get(`/schedule/${occurrenceId}/horses/suggestions?riderId=${await readyRider()}`, reception.token)).status, 422);
     assert.equal((await get(`/schedule/${occurrenceId}/horses/suggestions`, undefined)).status, 401);
-    assert.equal((await get(`/schedule/${occurrenceId}/horses/suggestions`, (await staff('stable_hand')).token)).status, 403);
+    assert.equal((await get(`/schedule/${occurrenceId}/horses/suggestions`, (await staff('stable_hand')).token)).status, 200);
   });
 });

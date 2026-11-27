@@ -29,23 +29,35 @@ export class AssignmentsService {
     if (!row || (user.role === ROLE.COACH && row.coachId !== user.id)) throw new NotFoundException('Class not found.');
     const occ = toOccurrence(row) as Occurrence & { branchId: string };
     occ.branchId = row.branchId;
-    const open = (occ.status === OCCURRENCE_STATUS.PUBLISHED || occ.status === OCCURRENCE_STATUS.IN_PROGRESS) && now < occ.endsAt;
+    // A draft can be given its horses before it is published.
+    const open = (occ.status === OCCURRENCE_STATUS.DRAFT || occ.status === OCCURRENCE_STATUS.PUBLISHED || occ.status === OCCURRENCE_STATUS.IN_PROGRESS) && now < occ.endsAt;
     return { occ, open };
   }
 
   private async horseFor(c: Tx, horseId: string, lock: boolean): Promise<Horse | undefined> {
     const h = (
       await c.query(
-        `SELECT h.id, h.status, h.suitable_levels::text[] AS "suitableLevels", coalesce(array(SELECT ha.arena_id FROM horse_arenas ha WHERE ha.horse_id = h.id), '{}') AS "suitableArenaIds"
+        `SELECT h.id, h.status, h.suitable_levels::text[] AS "suitableLevels", coalesce(array(SELECT ha.arena_id FROM horse_arenas ha WHERE ha.horse_id = h.id), '{}') AS "suitableArenaIds",
+                h.max_rider_weight_kg AS "maxRiderWeightKg", h.min_rider_age AS "minRiderAge", h.formats::text[] AS formats, h.max_sessions_per_day AS "maxSessionsPerDay", h.max_sessions_per_week AS "maxSessionsPerWeek"
            FROM horses h WHERE h.id = $1${lock ? ' FOR UPDATE OF h' : ''}`,
         [horseId],
       )
     ).rows[0];
-    return h as Horse | undefined;
+    if (!h) return undefined;
+    // An empty limit in the database is "no limit" to the rules.
+    return Object.fromEntries(Object.entries(h).filter(([, v]) => v !== null)) as unknown as Horse;
   }
 
   /** Every workload and suitability rule for one horse and one class, returned together. */
-  private async reasonsFor(c: Tx, occ: Occurrence & { branchId: string }, horse: Horse, riderLevels: string[], now: number): Promise<Reason[]> {
+  private async reasonsFor(c: Tx, occ: Occurrence & { branchId: string }, horse: Horse, riderLevels: string[], now: number, riderId?: string): Promise<Reason[]> {
+    // The weight and age of whoever will ride: the named rider, or everyone booked.
+    const riders = (
+      await c.query(
+        `SELECT r.weight_kg AS "weightKg", extract(year FROM age(to_timestamp($4::double precision / 1000), r.date_of_birth))::int AS "ageYears" FROM riders r
+          WHERE CASE WHEN $2::uuid IS NOT NULL THEN r.id = $2 ELSE EXISTS (SELECT 1 FROM bookings k WHERE k.rider_id = r.id AND k.occurrence_id = $1 AND k.status = ANY($3::booking_status[])) END`,
+        [occ.id, riderId ?? null, LIVE, occ.startsAt],
+      )
+    ).rows.map((r) => ({ weightKg: r.weightKg ?? undefined, ageYears: r.ageYears as number }));
     const rows = (
       await c.query(
         `SELECT ha.occurrence_id AS "occurrenceId", ha.horse_id AS "horseId", ${epochMs('lower(ha.during)')} AS "startsAt", ${epochMs('upper(ha.during)')} AS "endsAt"
@@ -57,7 +69,7 @@ export class AssignmentsService {
     const tz = (await c.query(`SELECT time_zone FROM branches WHERE id = $1`, [occ.branchId])).rows[0]?.time_zone as string;
     void now;
     return checkHorse({
-      horse, occurrence: occ, riderLevels: riderLevels as Level[], policy: await loadPolicy(c, occ.branchId), dayKeyOf: dayKeyFor(tz),
+      horse, occurrence: occ, riders, riderLevels: riderLevels as Level[], policy: await loadPolicy(c, occ.branchId), dayKeyOf: dayKeyFor(tz),
       assignments: rows.map((a) => ({ horseId: a.horseId, occurrenceId: a.occurrenceId, startsAt: Number(a.startsAt), endsAt: Number(a.endsAt) })),
     }).reasons;
   }
@@ -110,7 +122,7 @@ export class AssignmentsService {
         const horse = await this.horseFor(c, b.horseId, true);
         if (!horse) throw new NotFoundException(problem('Horse not found.', HORSE_PROBLEM.HORSE_NOT_FOUND));
 
-        const reasons = await this.reasonsFor(c, occ, horse, riderLevels, now);
+        const reasons = await this.reasonsFor(c, occ, horse, riderLevels, now, b.riderId);
         let overridden = false;
         if (reasons.length > 0) {
           if (!b.override) throw new UnprocessableEntityException({ message: 'This horse cannot be used for this class.', problems: reasons });
@@ -170,7 +182,7 @@ export class AssignmentsService {
       const unsuitable: { id: string; name: string; problems: Reason[] }[] = [];
       for (const h of horses) {
         const horse = (await this.horseFor(c, h.id, false))!;
-        const reasons = await this.reasonsFor(c, occ, horse, riderLevels, now);
+        const reasons = await this.reasonsFor(c, occ, horse, riderLevels, now, q.riderId);
         if (reasons.length === 0) suitable.push({ id: h.id, name: h.name });
         else unsuitable.push({ id: h.id, name: h.name, problems: reasons });
       }

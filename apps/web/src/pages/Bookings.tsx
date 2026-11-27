@@ -5,6 +5,7 @@ import { qs, useQuery } from '../lib/useApi';
 import type { Occurrence } from '../lib/types';
 import { Badge, Btn, Card, Load, PageHead, Table } from '../ui/kit';
 import { ClassDialog } from './ClassDialog';
+import { tr } from '../i18n';
 
 /** The day sheet: pick a day, open a class or ride, and handle its riders, payments and check-in. */
 export function Bookings() {
@@ -27,8 +28,8 @@ export function Bookings() {
           <Load q={q}>{(list) => (
             <Table rowKey={(o) => o.id} rows={[...list].sort((a, b) => a.startsAt.localeCompare(b.startsAt))} empty="Nothing is scheduled this day." onRow={setOpen} cols={[
               { head: 'Time', cell: (o) => `${fmtTime(o.startsAt)}–${fmtTime(o.endsAt)}`, width: '0.9fr' }, { head: 'Class or ride', cell: (o) => <b>{o.title}</b>, width: '1.6fr' },
-              { head: 'Where', cell: (o) => o.arenaName }, { head: 'Coach', cell: (o) => o.coachName }, { head: 'Price', cell: (o) => money(o.priceMinor), width: '0.8fr' },
-              { head: 'Places', cell: (o) => o.capacity, width: '0.6fr' }, { head: 'Level', cell: (o) => label(o.minLevel), width: '0.8fr' }, { head: 'Status', cell: (o) => <Badge value={o.status} />, width: '0.9fr' },
+              { head: 'Where', cell: (o) => o.arenaName }, { head: 'Coach', cell: (o) => o.coachName }, { head: 'Horses', cell: (o) => o.horses || <span className="sub">{o.status === 'cancelled' ? '—' : tr('Not assigned')}</span> }, { head: 'Price', cell: (o) => money(o.priceMinor), width: '0.8fr' },
+              { head: 'Free', cell: (o) => `${Math.max(0, o.capacity - o.booked)} of ${o.capacity}`, width: '0.6fr' }, { head: 'Level', cell: (o) => label(o.minLevel), width: '0.8fr' }, { head: 'Status', cell: (o) => <Badge value={o.status} />, width: '0.9fr' },
             ]} />
           )}</Load>
         </Card>

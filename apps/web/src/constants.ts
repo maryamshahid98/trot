@@ -6,10 +6,14 @@ export const ROLE = {
   RECEPTION: 'reception',
   MANAGER: 'manager',
   OWNER: 'owner',
+  DIRECTOR: 'director',
+  FINANCE: 'finance',
+  SCHEDULER: 'scheduler',
+  AUDITOR: 'auditor',
 } as const;
 export type Role = (typeof ROLE)[keyof typeof ROLE];
 
-export const STAFF_ROLES: readonly Role[] = [ROLE.COACH, ROLE.STABLE_HAND, ROLE.RECEPTION, ROLE.MANAGER, ROLE.OWNER];
+export const STAFF_ROLES: readonly Role[] = [ROLE.COACH, ROLE.STABLE_HAND, ROLE.RECEPTION, ROLE.MANAGER, ROLE.OWNER, ROLE.DIRECTOR, ROLE.FINANCE, ROLE.SCHEDULER, ROLE.AUDITOR];
 const FRONT: readonly Role[] = [ROLE.RECEPTION, ROLE.MANAGER, ROLE.OWNER];
 const MANAGERS: readonly Role[] = [ROLE.MANAGER, ROLE.OWNER];
 const ALL_STAFF = STAFF_ROLES;
@@ -49,7 +53,7 @@ export const NAV = [
   { key: 'bookings', path: PATH.BOOKINGS, icon: 'M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0z', roles: FRONT },
   { key: 'people', path: PATH.PEOPLE, icon: 'M2 20a7 7 0 0 1 14 0M18 20a6 6 0 0 0-3-5M16 4.5a3.5 3.5 0 0 1 0 7M9 4.5a3.5 3.5 0 1 0 0 7', roles: FRONT },
   { key: 'horses', path: PATH.HORSES, icon: 'M4 20V9l4-5 3 3h4l5 5v8', roles: ALL_STAFF },
-  { key: 'staff', path: PATH.STAFF, icon: 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM4 21a8 8 0 0 1 16 0', roles: MANAGERS },
+  { key: 'staff', path: PATH.STAFF, icon: 'M12 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM4 21a8 8 0 0 1 16 0', roles: ALL_STAFF },
   { key: 'money', path: PATH.MONEY, icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v10M9.5 9.5h4a1.5 1.5 0 0 1 0 3h-3a1.5 1.5 0 0 0 0 3h4', roles: FRONT },
   { key: 'progress', path: PATH.PROGRESS, icon: 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z', roles: [ROLE.COACH, ...MANAGERS] },
   { key: 'comms', path: PATH.COMMS, icon: 'M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4', roles: MANAGERS },
@@ -64,6 +68,9 @@ export const LEVELS = ['beginner', 'intermediate', 'advanced'] as const;
 export const CLASS_FORMATS = ['private', 'semi_private', 'group', 'trial', 'camp', 'assessment', 'open_riding'] as const;
 export const PAY_WITH = { PACKAGE: 'package', OFFICE: 'office' } as const;
 export const PAYMENT_METHODS = ['cash', 'card_at_desk', 'bank_transfer'] as const;
+/** What the office takes today. Older receipts may still show another method. */
+export const OFFICE_METHODS = ['cash', 'card_at_desk'] as const;
+export const CANCEL_CAUSES = ['customer', 'club', 'weather'] as const;
 export const ADJUSTMENT_KINDS = ['refund', 'credit', 'write_off', 'correction'] as const;
 export const BOOKING_STATUS = { PENDING_OFFICE_PAYMENT: 'pending_office_payment', CONFIRMED: 'confirmed', CHECKED_IN: 'checked_in', COMPLETED: 'completed', CANCELLED: 'cancelled', NO_SHOW: 'no_show' } as const;
 export const OCCURRENCE_STATUS = { DRAFT: 'draft', PUBLISHED: 'published', IN_PROGRESS: 'in_progress', COMPLETED: 'completed', CANCELLED: 'cancelled' } as const;
@@ -72,7 +79,20 @@ export const RIDER_FILTER_STATUSES = ['draft', 'pending_review', 'active', 'rest
 export const HORSE_STATUSES = ['available', 'resting', 'reserved', 'under_training', 'medical_hold', 'injured', 'retired'] as const;
 export const DOC_KINDS = ['medical_form', 'waiver', 'photo_permission', 'id_document'] as const;
 export const PACKAGE_STATUSES_SETTABLE = ['active', 'frozen', 'cancelled'] as const;
-export const ASSIGNABLE_ROLES = ['coach', 'stable_hand', 'reception', 'manager'] as const;
+export const ASSIGNABLE_ROLES = ['coach', 'stable_hand', 'reception', 'manager', 'scheduler', 'finance', 'auditor', 'director'] as const;
+/** Who may manage whom: only people ranked below you, and only roles below your own (kept in step with ROLE_RANK in the API). */
+export const ROLE_RANK: Record<string, number> = { customer: 0, coach: 1, stable_hand: 1, reception: 1, finance: 1, scheduler: 1, auditor: 1, manager: 2, director: 2.5, owner: 3 };
+/** The screens a limited title sees. Ordinary roles follow each menu item's own list. */
+export const TITLE_SCREENS: Record<string, readonly string[]> = {
+  scheduler: ['dashboard', 'calendar', 'bookings', 'people', 'horses', 'staff', 'security'],
+  finance: ['dashboard', 'bookings', 'people', 'money', 'reports', 'security'],
+};
+/** What a signed-in person may see in the menu. */
+export const menuFor = (role: string, title: string | undefined) => {
+  // A limited title has its own list of screens; everyone else follows each menu item's roles.
+  const own = title ? TITLE_SCREENS[title] : undefined;
+  return NAV.filter((n) => (own ? own.includes(n.key) : (n.roles as readonly string[]).includes(role)));
+};
 export const ACCOUNT_STATUSES_SETTABLE = ['active', 'locked'] as const;
 export const INCIDENT_SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
 export const INCIDENT_STATUSES = ['open', 'under_review', 'action_in_progress', 'pending_closure', 'closed', 'reopened'] as const;

@@ -1,14 +1,15 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { errorText } from '../lib/useApi';
 import { label } from '../lib/format';
+import { tr } from '../i18n';
 
 // ---------- layout ----------
 export function PageHead({ title, sub, actions }: { title: string; sub?: string; actions?: ReactNode }) {
   return (
     <div className="head">
       <div className="head-text">
-        <h1 className="title">{title}</h1>
+        <h1 className="title">{tr(title)}</h1>
         {sub && <span className="sub">{sub}</span>}
       </div>
       <div className="actions">{actions}</div>
@@ -17,10 +18,10 @@ export function PageHead({ title, sub, actions }: { title: string; sub?: string;
 }
 export function Card({ title, actions, children, flex }: { title?: string; actions?: ReactNode; children: ReactNode; flex?: boolean }) {
   return (
-    <section className="card" style={flex ? { flex: 1, minHeight: 0, overflow: 'auto' } : undefined}>
+    <section className={`card${flex ? ' fill' : ''}`}>
       {(title || actions) && (
         <div className="card-head">
-          <h2 className="card-title">{title}</h2>
+          <h2 className="card-title">{title ? tr(title) : title}</h2>
           <div className="actions">{actions}</div>
         </div>
       )}
@@ -30,7 +31,7 @@ export function Card({ title, actions, children, flex }: { title?: string; actio
 }
 export const Stat = ({ label: l, value, sub, hot }: { label: string; value: string; sub?: string; hot?: boolean }) => (
   <div className={`stat${hot ? ' hot' : ''}`}>
-    <span className="stat-l">{l}</span>
+    <span className="stat-l">{tr(l)}</span>
     <span className="stat-v">{value}</span>
     {sub && <span className="stat-s">{sub}</span>}
   </div>
@@ -42,7 +43,7 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: 
   return (
     <div className="tabs" role="tablist">
       {tabs.map((t) => (
-        <button key={t.id} role="tab" aria-selected={t.id === value} className={`tab${t.id === value ? ' on' : ''}`} onClick={() => onChange(t.id)}>{t.label}</button>
+        <button key={t.id} role="tab" aria-selected={t.id === value} className={`tab${t.id === value ? ' on' : ''}`} onClick={() => onChange(t.id)}>{tr(t.label)}</button>
       ))}
     </div>
   );
@@ -51,20 +52,20 @@ export function Tabs<T extends string>({ tabs, value, onChange }: { tabs: { id: 
 // ---------- buttons and badges ----------
 type BtnProps = { children: ReactNode; onClick?: () => void; kind?: 'primary' | 'plain' | 'danger'; small?: boolean; disabled?: boolean; type?: 'button' | 'submit' };
 export const Btn = ({ children, onClick, kind = 'plain', small, disabled, type = 'button' }: BtnProps) => (
-  <button type={type} className={`btn2 ${kind}${small ? ' small' : ''}`} onClick={onClick} disabled={disabled}>{children}</button>
+  <button type={type} className={`btn2 ${kind}${small ? ' small' : ''}`} onClick={onClick} disabled={disabled}>{typeof children === 'string' ? tr(children) : children}</button>
 );
 const TONES: Record<string, string> = {
   sent: 'good', queued: 'warn', sending: 'warn', failed: 'bad', paid: 'good', issued: 'warn', voided: 'bad', passed: 'good', below: 'bad',
   confirmed: 'good', active: 'good', available: 'good', verified: 'good', approved: 'good', completed: 'good', published: 'good', closed: 'good', checked_in: 'good',
-  pending_office_payment: 'warn', pending: 'warn', requested: 'warn', draft: 'warn', pending_review: 'warn', resting: 'warn', frozen: 'warn', submitted: 'warn', open: 'warn', medium: 'warn',
+  pending_office_payment: 'warn', pending: 'warn', awaiting_approval: 'warn', requested: 'warn', draft: 'warn', pending_review: 'warn', resting: 'warn', frozen: 'warn', submitted: 'warn', open: 'warn', medium: 'warn',
   cancelled: 'bad', no_show: 'bad', rejected: 'bad', suspended: 'bad', injured: 'bad', medical_hold: 'bad', expired: 'bad', locked: 'bad', critical: 'bad', high: 'bad', reopened: 'bad',
 };
-export const Badge = ({ value }: { value: string }) => <span className={`badge ${TONES[value] ?? 'neutral'}`}>{label(value)}</span>;
+export const Badge = ({ value }: { value: string }) => <span className={`badge ${TONES[value] ?? 'neutral'}`}>{tr(label(value))}</span>;
 
 // ---------- tables ----------
 export interface Col<R> { head: string; cell: (r: R) => ReactNode; width?: string; right?: boolean }
 export function Table<R>({ cols, rows, empty = 'Nothing to show.', onRow, rowKey }: { cols: Col<R>[]; rows: R[]; empty?: string; onRow?: (r: R) => void; rowKey: (r: R) => string }) {
-  if (rows.length === 0) return <Empty>{empty}</Empty>;
+  if (rows.length === 0) return <Empty>{tr(empty)}</Empty>;
   // One grid for the whole table, so every row shares the same columns. A column never gets narrower than its widest
   // unbreakable content (a badge, a button), so cells cannot spill into their neighbours.
   const grid = cols.map((c) => `minmax(min-content, ${c.width ?? '1fr'})`).join(' ');
@@ -73,11 +74,16 @@ export function Table<R>({ cols, rows, empty = 'Nothing to show.', onRow, rowKey
     <div className="table-wrap">
       <div className="table" role="table" style={{ gridTemplateColumns: grid }}>
         <div className="tr th" role="row">
-          {cols.map((c) => <span key={c.head} role="columnheader" className={cell(c)}>{c.head}</span>)}
+          {cols.map((c) => <span key={c.head} role="columnheader" className={cell(c)}>{tr(c.head)}</span>)}
         </div>
         {rows.map((r) => (
           <div key={rowKey(r)} className={`tr${onRow ? ' click' : ''}`} role="row" onClick={onRow ? () => onRow(r) : undefined}>
-            {cols.map((c) => <span key={c.head} role="cell" className={cell(c)} data-label={c.head}>{c.cell(r)}</span>)}
+            {cols.map((c, i) => (
+              <span key={c.head} role="cell" className={cell(c)} data-label={tr(c.head)}>
+                {/* A row that opens something has a real button in its first cell, so the keyboard can reach it. The click bubbles to the row. */}
+                {onRow && i === 0 ? <button type="button" className="row-open">{c.cell(r)}</button> : c.cell(r)}
+              </span>
+            ))}
           </div>
         ))}
       </div>
@@ -134,16 +140,47 @@ export function useAct() {
 }
 
 // ---------- dialogs ----------
+/** Open dialogs, oldest first. Only the one on top answers Escape. */
+const stack: symbol[] = [];
+const FOCUSABLE = 'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+
 export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
+  const box = useRef<HTMLDivElement>(null);
+  const typed = useRef(false); // something was entered: do not throw it away by accident
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; });
+  const leave = useCallback(() => { if (!typed.current || window.confirm('Close without saving what you entered?')) close.current(); }, []);
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+    const me = Symbol('dialog');
+    stack.push(me);
+    const before = document.activeElement as HTMLElement | null;
+    const body = box.current?.querySelector<HTMLElement>('.modal-body');
+    if (!box.current?.contains(document.activeElement)) (body?.querySelector<HTMLElement>(FOCUSABLE) ?? box.current)?.focus();
+    const key = (e: KeyboardEvent) => {
+      if (stack[stack.length - 1] !== me) return;
+      if (e.key === 'Escape') { e.preventDefault(); leave(); return; }
+      if (e.key !== 'Tab' || !box.current) return;
+      // Keep the keyboard inside the dialog.
+      const all = [...box.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
+      if (all.length === 0) return;
+      const first = all[0];
+      const last = all[all.length - 1];
+      const inside = box.current.contains(document.activeElement);
+      if (e.shiftKey && (!inside || document.activeElement === first)) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && (!inside || document.activeElement === last)) { e.preventDefault(); first.focus(); }
+    };
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('keydown', key); stack.splice(stack.indexOf(me), 1); before?.focus?.(); };
+  }, [leave]);
+  const note = (e: { target: EventTarget }) => {
+    const t = e.target as HTMLElement;
+    // Only typing in this dialog's own form counts, not a search box or a dialog opened above it.
+    if (t.closest('.modal') === box.current && t.closest('form')) typed.current = true;
+  };
   return (
-    <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
-        <div className="modal-head"><h2 className="card-title">{title}</h2><button className="x" aria-label="Close" onClick={onClose}>×</button></div>
+    <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget && !typed.current) close.current(); }}>
+      <div ref={box} tabIndex={-1} className={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title} onChangeCapture={note}>
+        <div className="modal-head"><h2 className="card-title">{tr(title)}</h2><button type="button" className="x" aria-label="Close" onClick={leave}>×</button></div>
         <div className="modal-body">{children}</div>
       </div>
     </div>

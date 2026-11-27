@@ -188,7 +188,7 @@ export class ReportsService {
             WHERE b.branch_id = $1 AND b.pay_with = 'office' AND b.status = ANY($3::booking_status[])
               AND NOT EXISTS (SELECT 1 FROM receipts rc WHERE rc.for_booking_id = b.id)
             ORDER BY lower(o.during) LIMIT $4`,
-          [branchId, AUDIT.BOOKING_CONFIRM_UNPAID, [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.COMPLETED], q.limit],
+          [branchId, AUDIT.BOOKING_CONFIRM_UNPAID, [BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.COMPLETED, BOOKING_STATUS.NO_SHOW], q.limit],
         )
       ).rows.map((r) => ({ ...r, startsAt: Number(r.startsAt) }));
       return { unpaid: rows, owedMinor: rows.reduce((s: number, r) => s + r.priceMinor, 0) };
@@ -202,7 +202,7 @@ export class ReportsService {
     const branches = q.branchId ? [q.branchId] : user.branchIds;
     const rows = (
       await this.db.query(
-        `SELECT l.id::text AS id, ${epochMs('l.at')} AS at, l.actor_account_id AS "actorId", a.full_name AS "actorName", l.branch_id AS "branchId", l.action, l.entity, l.entity_id AS "entityId", l.detail
+        `SELECT l.id::text AS id, ${epochMs('l.at')} AS at, l.actor_account_id AS "actorId", a.full_name AS "actorName", l.branch_id AS "branchId", l.action, l.entity, l.entity_id AS "entityId", l.detail, l.source
            FROM audit_log l LEFT JOIN accounts a ON a.id = l.actor_account_id
           WHERE l.branch_id = ANY($1::uuid[]) AND ($2::text IS NULL OR l.action = $2) AND ($3::text IS NULL OR l.entity = $3) AND ($4::text IS NULL OR l.entity_id = $4)
             AND ($5::uuid IS NULL OR l.actor_account_id = $5) AND ($6::timestamptz IS NULL OR l.at >= $6) AND ($7::timestamptz IS NULL OR l.at < $7) AND ($8::bigint IS NULL OR l.id < $8)

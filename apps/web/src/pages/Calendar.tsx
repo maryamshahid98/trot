@@ -45,7 +45,7 @@ export function Calendar() {
                   <button key={o.id} className={`ev${o.rideTypeId ? ' ride' : ''} ${o.status}`} onClick={() => setOpen(o)}>
                     <b>{fmtTime(o.startsAt)} {o.title}{o.seriesId ? <span className="repeat-mark" role="img" aria-label="repeats" title="Part of a repeating series"> ↻</span> : null}</b>
                     <span>{o.arenaName} · {o.coachName}</span>
-                    <span>{label(o.status)} · {places(o.capacity)}</span>
+                    <span>{label(o.status)} · {Math.max(0, o.capacity - o.booked)} of {places(o.capacity)} free</span>
                   </button>
                 ))}
               </div>

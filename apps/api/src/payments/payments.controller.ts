@@ -60,6 +60,9 @@ export class PaymentsController {
   @Get('receipts/:id') @Roles(...FAMILY_AND_STAFF)
   receipt(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.payments.getReceipt(id, u); }
 
+  @Post('adjustments/:id/approve') @Roles(...MANAGERS)
+  approve(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.payments.approve(id, u); }
+
   @Post('receipts/:id/adjustments') @Roles(...STAFF)
   adjustReceipt(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.payments.adjust(id, b, u); }
 }

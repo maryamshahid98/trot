@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useBranch } from '../lib/branch';
-import { fmtDate, fmtDateTime, label, money } from '../lib/format';
+import { dayEndIso, dayStartIso, fmtDate, fmtDateTime, label, money } from '../lib/format';
 import { qs, useQuery } from '../lib/useApi';
 import { Badge, Btn, Card, Load, Modal, Table } from '../ui/kit';
 
@@ -9,7 +9,7 @@ interface InvoiceRow {
   issuedAt: string; paidAt: string | null; receiptNumber: string | null; description: string | null;
 }
 interface InvoiceDetail extends InvoiceRow {
-  branchName: string; payerName: string | null;
+  branchName: string; payerName: string | null; sellerName: string; sellerTaxNumber: string | null; sellerAddress: string | null; sellerPhone: string | null; sellerEmail: string | null; sellerLogo: string | null;
   lines: { description: string; quantity: number; totalMinor: number; vatMinor: number }[];
   creditNotes: { id: string; number: string; amountMinor: number; vatMinor: number; reason: string; issuedAt: string }[];
 }
@@ -62,7 +62,8 @@ export function InvoiceDialog({ id, onClose }: { id: string; onClose: () => void
       <Load q={q}>{(i) => (
         <div className="print-area">
           <div className="doc-head">
-            <div><h2 className="card-title" style={{ fontSize: 20 }}>Tax invoice {i.number}</h2><span className="sub">{i.branchName}</span></div>
+            <div>{i.sellerLogo && <img className="doc-logo" src={i.sellerLogo} alt="" />}<h2 className="card-title" style={{ fontSize: 20 }}>Tax invoice {i.number}</h2><span className="sub">{[i.sellerName, i.branchName, i.sellerAddress, i.sellerPhone, i.sellerEmail].filter(Boolean).join(' · ')}</span><br />
+              <span className="sub">{i.sellerTaxNumber ? `Tax number ${i.sellerTaxNumber}` : <span className="no-print">Add the club’s tax number under Admin &gt; Club.</span>}</span></div>
             <Badge value={i.status} />
           </div>
           <dl className="kv">
@@ -104,11 +105,18 @@ const TYPE_LABEL: Record<string, string> = { invoice: 'Invoice', receipt: 'Payme
 
 /** A rider's account: what was charged, paid, credited and refunded, and where it stands. Print it as a statement. */
 export function AccountPanel({ riderId }: { riderId: string }) {
-  const q = useQuery<Account>(`/riders/${riderId}/account`);
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const q = useQuery<Account>(`/riders/${riderId}/account${qs({ from: from ? dayStartIso(from) : '', to: to ? dayEndIso(to) : '' })}`);
   return (
     <Card title="Account">
+      <div className="filters">
+        <label className="sub">From <input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} /></label>
+        <label className="sub">To <input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} /></label>
+      </div>
       <Load q={q}>{(a) => (
         <div className="print-area">
+          {(from || to) && <p className="sub">Statement for {a.riderName}{from ? ` from ${from}` : ''}{to ? ` to ${to}` : ''} · opening balance {money(a.openingBalanceMinor, a.currency)}</p>}
           <p>
             {a.balanceMinor > 0 ? <>Owed by the family: <b>{money(a.balanceMinor, a.currency)}</b></> : a.balanceMinor < 0 ? <>Credit in the family's favour: <b>{money(-a.balanceMinor, a.currency)}</b></> : <>Nothing owed either way.</>}
             {a.unpaidInvoicesMinor > 0 && <span className="sub"> · {money(a.unpaidInvoicesMinor, a.currency)} on invoices not yet paid</span>}

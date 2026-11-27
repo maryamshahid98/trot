@@ -18,7 +18,8 @@ export type { Tx } from '../common/sql.ts';
 export const LIVE = [BOOKING_STATUS.PENDING_OFFICE_PAYMENT, BOOKING_STATUS.CONFIRMED, BOOKING_STATUS.CHECKED_IN, BOOKING_STATUS.COMPLETED];
 
 export const OCC_COLS = `o.id, o.branch_id AS "branchId", o.title, o.format, o.min_level AS "minLevel", o.status, o.capacity,
-  o.min_age_years AS "minAgeYears", o.price_minor AS "priceMinor", o.arena_id AS "arenaId", o.coach_id AS "coachId",
+  o.min_age_years AS "minAgeYears", o.max_age_years AS "maxAgeYears", o.max_rider_weight_kg AS "maxRiderWeightKg", o.book_until_hours AS "bookUntilHours",
+  o.cancel_hours AS "cancelHours", o.horse_required AS "horseRequired", o.single_visit AS "singleVisit", o.ride_type_id AS "rideTypeId", o.price_minor AS "priceMinor", o.arena_id AS "arenaId", o.coach_id AS "coachId",
   ${epochMs('lower(o.during)')} AS "startsAt", ${epochMs('upper(o.during)')} AS "endsAt"`;
 
 export const toOccurrence = (o: Row): Occurrence => ({ ...(o as Omit<Occurrence, 'startsAt' | 'endsAt'>), startsAt: Number(o.startsAt), endsAt: Number(o.endsAt) });
@@ -28,7 +29,23 @@ export const toBooking = (r: Row): Booking => ({
 
 /** Locks the class row so two people asking for the last place are decided one after the other. */
 export async function lockOccurrence(c: Tx, id: string) {
-  return (await c.query(`SELECT ${OCC_COLS} FROM occurrences o WHERE o.id = $1 FOR UPDATE`, [id])).rows[0] as (Occurrence & { branchId: string }) | undefined;
+  const row = (await c.query(`SELECT ${OCC_COLS} FROM occurrences o WHERE o.id = $1 FOR UPDATE`, [id])).rows[0] as (Occurrence & { branchId: string }) | undefined;
+  if (!row) return undefined;
+  // The places on offer are the lower of the class's and the arena's (BR-004), unless a manager knowingly went past the arena's.
+  const arena = (
+    await c.query(
+      `SELECT a.max_capacity AS n FROM arenas a WHERE a.id = $2
+          AND NOT EXISTS (SELECT 1 FROM occurrence_overrides v WHERE v.occurrence_id = $1 AND 'ARENA_CAPACITY' = ANY(v.codes))`,
+      [id, row.arenaId],
+    )
+  ).rows[0];
+  if (arena && arena.n < row.capacity) row.capacity = arena.n;
+  // Where a horse is required, there are no more places than horses assigned (once any are).
+  if ((row as { horseRequired?: boolean }).horseRequired) {
+    const horses = (await c.query(`SELECT count(DISTINCT horse_id)::int AS n FROM horse_assignments WHERE occurrence_id = $1`, [id])).rows[0].n as number;
+    if (horses > 0 && horses < row.capacity) row.capacity = horses;
+  }
+  return row;
 }
 
 /**
@@ -49,8 +66,11 @@ export async function expireStaleHolds(c: Tx, occurrenceId: string, branchId: st
 export async function loadRiderFacts(c: Tx, riderId: string, now: number, ownedBy?: string): Promise<(Rider & { branchId: string }) | undefined> {
   const row = (
     await c.query(
-      `SELECT r.id, r.branch_id AS "branchId", r.status, r.level, ${epochMs('r.date_of_birth::timestamp')} AS dob,
-              (SELECT g.guardian_account_id FROM guardian_riders g WHERE g.rider_id = r.id LIMIT 1) AS "guardianId"
+      `SELECT r.id, r.branch_id AS "branchId", r.level, r.weight_kg AS "weightKg",
+              -- A restriction or suspension only bites inside its dates.
+              CASE WHEN r.status IN ('restricted', 'suspended') AND (r.restricted_from > current_date OR r.restricted_until < current_date) THEN 'active' ELSE r.status::text END AS status, ${epochMs('r.date_of_birth::timestamp')} AS dob,
+              (coalesce(r.emergency_contact->>'name', '') <> '' AND coalesce(r.emergency_contact->>'phone', '') <> '') AS "hasEmergencyContact",
+              (SELECT g.guardian_account_id FROM guardian_riders g WHERE g.rider_id = r.id AND g.has_authority LIMIT 1) AS "guardianId"
          FROM riders r
         WHERE r.id = $1 AND ($2::uuid IS NULL OR r.account_id = $2 OR EXISTS (SELECT 1 FROM guardian_riders g WHERE g.rider_id = r.id AND g.guardian_account_id = $2))`,
       [riderId, ownedBy ?? null],
@@ -59,8 +79,11 @@ export async function loadRiderFacts(c: Tx, riderId: string, now: number, ownedB
   if (!row) return undefined;
   const docs = (
     await c.query(
-      `SELECT kind, ${epochMs('signed_at')} AS "signedAt", ${epochMs('expires_at')} AS "expiresAt"
-         FROM rider_documents WHERE rider_id = $1 AND status = $2 AND kind = ANY($3::document_kind[])`,
+      `SELECT d.kind, ${epochMs('d.signed_at')} AS "signedAt", ${epochMs('d.expires_at')} AS "expiresAt",
+              -- An old waiver stops counting when the club publishes a version that everyone must sign again (BR-023).
+              (d.kind = 'waiver' AND EXISTS (SELECT 1 FROM riders r JOIN LATERAL (SELECT v.id, v.requires_resign FROM waiver_versions v WHERE v.branch_id = r.branch_id ORDER BY v.published_at DESC LIMIT 1) cur ON true
+                                              WHERE r.id = d.rider_id AND cur.requires_resign AND d.waiver_version_id IS DISTINCT FROM cur.id)) AS outdated
+         FROM rider_documents d WHERE d.rider_id = $1 AND d.status = $2 AND d.kind = ANY($3::document_kind[])`,
       [riderId, DOC_STATUS.VERIFIED, [DOC_KIND.MEDICAL_FORM, DOC_KIND.WAIVER]],
     )
   ).rows;
@@ -69,9 +92,9 @@ export async function loadRiderFacts(c: Tx, riderId: string, now: number, ownedB
   for (const d of docs) {
     const expires = d.expiresAt === null ? Number.MAX_SAFE_INTEGER : Number(d.expiresAt);
     if (d.kind === DOC_KIND.MEDICAL_FORM) medicalFormExpiresAt = Math.max(medicalFormExpiresAt ?? 0, expires);
-    if (d.kind === DOC_KIND.WAIVER && expires > now) waiverSignedAt = Number(d.signedAt ?? now);
+    if (d.kind === DOC_KIND.WAIVER && expires > now && !d.outdated) waiverSignedAt = Number(d.signedAt ?? now);
   }
-  return { id: row.id, branchId: row.branchId, status: row.status, level: row.level, dateOfBirth: Number(row.dob), guardianId: row.guardianId ?? undefined, medicalFormExpiresAt, waiverSignedAt };
+  return { id: row.id, branchId: row.branchId, status: row.status, level: row.level, dateOfBirth: Number(row.dob), guardianId: row.guardianId ?? undefined, hasEmergencyContact: row.hasEmergencyContact === true, weightKg: row.weightKg ?? undefined, medicalFormExpiresAt, waiverSignedAt };
 }
 
 export async function loadRiderBookings(c: Tx, riderId: string) {
@@ -110,17 +133,26 @@ export async function checkPackage(c: Tx, packageId: string, riderId: string, oc
   const p = (
     await c.query(
       `SELECT rp.id, rp.status, ${epochMs('rp.valid_until')} AS "validUntil", pt.class_formats::text[] AS formats,
+              pt.ride_type_ids AS "rideTypeIds", pt.arena_ids AS "arenaIds", pt.levels::text[] AS levels,
+              (SELECT NOT (($3::timestamptz AT TIME ZONE b.time_zone)::time >= coalesce(pt.from_time, '00:00') AND ($3::timestamptz AT TIME ZONE b.time_zone)::time <= coalesce(pt.to_time, '23:59:59'))
+                 FROM branches b WHERE b.id = pt.branch_id) AS "outsideTimes",
               coalesce((SELECT sum(l.delta) FROM package_ledger l WHERE l.rider_package_id = rp.id), 0)::int AS balance
          FROM rider_packages rp JOIN package_types pt ON pt.id = rp.package_type_id
-        WHERE rp.id = $1 AND rp.rider_id = $2`,
-      [packageId, riderId],
+        WHERE rp.id = $1 AND (rp.rider_id = $2 OR (pt.family AND EXISTS (
+          SELECT 1 FROM guardian_riders a JOIN guardian_riders z ON z.guardian_account_id = a.guardian_account_id WHERE a.rider_id = rp.rider_id AND z.rider_id = $2)))`,
+      [packageId, riderId, new Date(occ.startsAt).toISOString()],
     )
   ).rows[0];
-  if (!p) return { problems: [{ code: PROBLEM.PACKAGE_NOT_FOUND, message: 'That package does not belong to this rider.' }], balance: 0, found: false };
+  if (!p) return { problems: [{ code: PROBLEM.PACKAGE_NOT_FOUND, message: 'That package does not belong to this rider.' }], balance: 0, found: false, rideCovered: false };
+  const rideTypeId = (occ as { rideTypeId?: string | null }).rideTypeId;
+  const rideCovered = !!rideTypeId && p.rideTypeIds.includes(rideTypeId);
   if (p.status !== PACKAGE_STATUS.ACTIVE) problems.push({ code: PROBLEM.PACKAGE_NOT_ACTIVE, message: 'This package is not active.' });
   if (Number(p.validUntil) < occ.startsAt) problems.push({ code: PROBLEM.PACKAGE_EXPIRED, message: 'This package will have expired by this class.' });
   if (occ.format !== RIDE_FORMAT && !p.formats.includes(occ.format)) problems.push({ code: PROBLEM.PACKAGE_FORMAT_MISMATCH, message: 'This package cannot be used for this kind of class.' });
-  return { problems, balance: p.balance as number, found: true };
+  if (p.arenaIds.length && !p.arenaIds.includes(occ.arenaId)) problems.push({ code: 'PACKAGE_ARENA_MISMATCH', message: 'This package cannot be used at this arena.' });
+  if (p.levels.length && !p.levels.includes(occ.minLevel)) problems.push({ code: 'PACKAGE_LEVEL_MISMATCH', message: 'This package cannot be used for this level.' });
+  if (p.outsideTimes) problems.push({ code: 'PACKAGE_TIME_MISMATCH', message: 'This package cannot be used at this time of day.' });
+  return { problems, balance: p.balance as number, found: true, rideCovered };
 }
 
 export type Evaluation =
@@ -144,11 +176,13 @@ export async function evaluate(
   const problems: Reason[] = [];
   let packageBalance = 0;
   let packageMissing = false;
+  let rideCovered = false;
   if (p.payWith === PAY_WITH.PACKAGE) {
     const pk = await checkPackage(c, p.packageId as string, p.riderId, p.occ);
     problems.push(...pk.problems);
     packageBalance = pk.balance;
     packageMissing = !pk.found;
+    rideCovered = pk.rideCovered;
   }
   if (!p.ignoreWaitlist) {
     const waiting = await c.query(`SELECT 1 FROM waitlist_entries WHERE occurrence_id = $1 AND rider_id = $2 AND status = ANY($3)`, [
@@ -156,7 +190,10 @@ export async function evaluate(
     ]);
     if (waiting.rowCount) problems.push({ code: PROBLEM.ALREADY_WAITLISTED, message: 'This rider is already on the waitlist for this class. If you were offered a place, accept the offer instead.' });
   }
-  const e = checkEligibility({ rider, occurrence: p.occ, now: p.now, policy: p.policy, payWith: p.payWith, packageBalance, riderBookings, dayKeyOf: dayKeyFor(tz) });
+  if ((p.occ as { horseRequired?: boolean }).horseRequired && !(await c.query(`SELECT 1 FROM horse_assignments WHERE occurrence_id = $1 LIMIT 1`, [p.occ.id])).rowCount) {
+    problems.push({ code: 'NO_HORSE_ASSIGNED', message: 'No horse is assigned yet. Assign the horses first.' });
+  }
+  const e = checkEligibility({ rider, occurrence: p.occ, now: p.now, policy: p.policy, payWith: p.payWith, packageBalance, riderBookings, dayKeyOf: dayKeyFor(tz), rideCovered });
   // A missing package already has its own, clearer reason.
   const reasons = [...problems, ...e.reasons.filter((r) => !(r.code === 'NO_PACKAGE_BALANCE' && packageMissing))];
   return { kind: 'checked', reasons, inClass, offered };
@@ -232,3 +269,9 @@ export async function promoteWaitlist(c: Tx, occ: Occurrence & { branchId: strin
   }
   return made;
 }
+
+/** The club's cancellation window, unless the class or ride type set its own (copied onto the session). */
+export const policyFor = <P extends { freeCancelHoursBefore: number }>(policy: P, occ: object): P => {
+  const own = (occ as { cancelHours?: number | null }).cancelHours;
+  return own === null || own === undefined ? policy : { ...policy, freeCancelHoursBefore: own };
+};

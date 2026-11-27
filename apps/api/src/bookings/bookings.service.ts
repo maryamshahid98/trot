@@ -12,7 +12,7 @@ import { DbService } from '../db/db.service.ts';
 import { queueForRider } from '../notifications/outbox.ts';
 import { CancelBooking, CreateBooking, IdParam, RosterQuery } from './bookings.schemas.ts';
 import {
-  evaluate, expireStaleHolds, insertBooking, LIVE, lockOccurrence, promoteWaitlist, returnPackageClass, toBooking, toOccurrence,
+  evaluate, expireStaleHolds, insertBooking, LIVE, lockOccurrence, policyFor, promoteWaitlist, returnPackageClass, toBooking, toOccurrence,
 } from './core.ts';
 import { pgErrorCode } from '../common/errors.ts';
 
@@ -43,7 +43,8 @@ export class BookingsService {
         if (ev.kind === 'wrong_branch') throw cannotBook([{ code: PROBLEM.RIDER_WRONG_BRANCH, message: 'This rider belongs to a different branch.' }]);
         if (ev.reasons.length > 0) throw cannotBook(ev.reasons);
 
-        const source = customer ? BOOKING_SOURCE.CUSTOMER_APP : BOOKING_SOURCE.STAFF_PORTAL;
+        const walkIn = !customer && (await c.query(`SELECT 1 FROM riders WHERE id = $1 AND is_walk_in`, [b.riderId])).rowCount;
+        const source = customer ? BOOKING_SOURCE.CUSTOMER_APP : walkIn ? BOOKING_SOURCE.WALK_IN : BOOKING_SOURCE.STAFF_PORTAL;
         let placement: string = place(occ, ev.inClass, b.payWith, now, policy);
         // Places promised to people with an open waitlist offer are not free for newcomers.
         if (placement !== 'waitlisted' && ev.offered >= spotsLeft(occ, ev.inClass, now, policy)) placement = 'waitlisted';
@@ -68,7 +69,8 @@ export class BookingsService {
           event: placement === BOOKING_STATUS.PENDING_OFFICE_PAYMENT ? 'booking.pending_payment' : 'booking.confirmed', branchId: occ.branchId, occurrenceId: occ.id,
           dedupeKey: `booking:${ins.id}:created`, data: { amountMinor: occ.priceMinor, holdMinutes: policy.officeHoldMinutes },
         });
-        return { id: ins.id, status: placement, holdExpiresAt: ins.holdExpiresAt };
+        const number = (await c.query(`SELECT number FROM bookings WHERE id = $1`, [ins.id])).rows[0].number as string;
+        return { id: ins.id, number, status: placement, holdExpiresAt: ins.holdExpiresAt };
       });
     } catch (e: unknown) {
       if (pgErrorCode(e) === PG_ERROR.CHECK_VIOLATION) throw cannotBook([{ code: PROBLEM.NO_PACKAGE_BALANCE, message: 'No classes left in the package.' }]);
@@ -103,7 +105,7 @@ export class BookingsService {
       ).rows[0];
 
       const policy = await loadPolicy(c, occRow.branchId);
-      const decision = decideCancellation(toBooking(row), toOccurrence(occRow), now, cause, policy);
+      const decision = decideCancellation(toBooking(row), toOccurrence(occRow), now, cause, policyFor(policy, occRow));
       if (!decision.allowed) throw new ConflictException({ message: decision.reason, problems: [{ code: PROBLEM.CANNOT_CANCEL, message: decision.reason }] });
       await c.query(`UPDATE bookings SET status = $2, cancelled_at = now(), cancel_cause = $3, consumed_class = $4 WHERE id = $1`, [id, BOOKING_STATUS.CANCELLED, cause, decision.consumesClass]);
       if (decision.returnsPackageClass && row.packageId) await returnPackageClass(c, row.packageId, id, user.id);
@@ -113,6 +115,32 @@ export class BookingsService {
       // The freed place goes to the next person waiting.
       const offers = await promoteWaitlist(c, { ...toOccurrence(occRow), branchId: occRow.branchId }, now, policy, user);
       return { id, status: BOOKING_STATUS.CANCELLED, consumedClass: decision.consumesClass, returnedToPackage: decision.returnsPackageClass, reason: decision.reason, waitlistOffers: offers.length };
+    });
+  }
+
+  /** What cancelling would do, shown to staff before they confirm (BRD 5.7). Changes nothing. */
+  async cancelPreview(rawId: string, query: unknown, user: AuthUser) {
+    const { id } = parse(IdParam, { id: rawId });
+    const { cause = CANCEL_CAUSE.CUSTOMER } = parse(CancelBooking, query);
+    return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+      const row = (
+        await c.query(
+          `SELECT b.id, b.occurrence_id AS "occurrenceId", b.rider_id AS "riderId", b.status, b.pay_with AS "payWith", b.rider_package_id AS "packageId", ${epochMs('b.created_at')} AS "createdAt" FROM bookings b WHERE b.id = $1`,
+          [id],
+        )
+      ).rows[0];
+      if (!row) throw new NotFoundException('Booking not found.');
+      const occRow = (await lockOccurrence(c, row.occurrenceId))!;
+      const decision = decideCancellation(toBooking(row), toOccurrence(occRow), Date.now(), cause, policyFor(await loadPolicy(c, occRow.branchId), occRow));
+      const paid = (
+        await c.query(
+          `SELECT r.id AS "receiptId", r.number, r.amount_minor AS "paidMinor",
+                  coalesce((SELECT sum(f.amount_minor) FROM financial_adjustments f WHERE f.receipt_id = r.id AND f.kind IN ('refund','credit')), 0)::int AS "returnedMinor"
+             FROM receipts r WHERE r.for_booking_id = $1 ORDER BY r.issued_at DESC LIMIT 1`,
+          [id],
+        )
+      ).rows[0];
+      return { cause, ...decision, payment: paid ?? null };
     });
   }
 
@@ -151,11 +179,12 @@ export class BookingsService {
       // No medical notes or contact details here: a roster is for running the class. A lapsed office hold is not on it.
       const bookings = (
         await c.query(
-          `SELECT b.id, b.status, b.pay_with AS "payWith", b.created_at AS "createdAt", r.id AS "riderId", r.full_name AS "riderName", r.level
+          `SELECT b.id, b.status, b.pay_with AS "payWith", b.created_at AS "createdAt", r.id AS "riderId", r.full_name AS "riderName", r.level,
+                  b.source, b.number, b.attendance, b.actual_horse_id AS "horseId", b.lesson_outcome AS "outcome", b.skills_practised AS "skillIds", b.instructor_notes AS "notes", b.hold_expires_at AS "holdExpiresAt", (SELECT i.gross_minor FROM invoices i WHERE i.booking_id = b.id AND i.status = 'issued') AS "owedMinor"
              FROM bookings b JOIN riders r ON r.id = b.rider_id
             WHERE b.occurrence_id = $1 AND b.status = ANY($2::booking_status[]) AND (b.status <> $4 OR b.hold_expires_at > now())
             ORDER BY b.created_at LIMIT $3`,
-          [occurrenceId, LIVE, LIMITS.bookingsListLimit, BOOKING_STATUS.PENDING_OFFICE_PAYMENT],
+          [occurrenceId, [...LIVE, BOOKING_STATUS.NO_SHOW], LIMITS.bookingsListLimit, BOOKING_STATUS.PENDING_OFFICE_PAYMENT],
         )
       ).rows;
       const waitlist = (

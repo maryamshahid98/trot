@@ -5,7 +5,7 @@ export interface Problem { field: string; message: string }
 export class ApiError extends Error {
   constructor(public status: number, message: string, public problems: Problem[] = []) { super(message); }
 }
-export interface SessionUser { id: string; role: Role; fullName: string | null; locale?: string; theme?: string; branchIds: string[]; mfaEnabled?: boolean; mfaEnrollmentRequired?: boolean }
+export interface SessionUser { id: string; role: Role; /** The account's own role when it differs from the one its screens are built from. */ title?: Role; actsAs?: Role; fullName: string | null; locale?: string; theme?: string; branchIds: string[]; mfaEnabled?: boolean; mfaEnrollmentRequired?: boolean }
 interface LoginResult { accessToken: string; expiresIn: number; user: SessionUser }
 
 // The access token lives only in memory. The refresh token is an HttpOnly cookie the browser sends by itself,

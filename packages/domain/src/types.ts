@@ -16,6 +16,9 @@ export interface Rider {
   guardianId?: Id;
   medicalFormExpiresAt?: number; // undefined = never provided
   waiverSignedAt?: number;
+  weightKg?: number;
+  /** False when nobody is recorded to call in an emergency. A minor may not book without one (BR-001). */
+  hasEmergencyContact?: boolean;
 }
 
 export type OccurrenceStatus = "draft" | "published" | "in_progress" | "completed" | "cancelled";
@@ -33,6 +36,13 @@ export interface Occurrence {
   priceMinor: number; // minor units (halalas)
   /** Rides only: the youngest age, in whole years, on the day of the ride. Copied from the ride type when the ride is scheduled. */
   minAgeYears?: number;
+  /** Further limits copied from the class or ride type; null or undefined means none. */
+  maxAgeYears?: number | null;
+  maxRiderWeightKg?: number | null;
+  /** Booking closes this many hours before the start. */
+  bookUntilHours?: number | null;
+  /** A one-off Trial or Single Class: paid by itself, never from a package. */
+  singleVisit?: boolean;
 }
 
 export type BookingStatus =
@@ -60,6 +70,14 @@ export interface Horse {
   status: "available" | "resting" | "reserved" | "under_training" | "medical_hold" | "injured" | "retired";
   suitableLevels: Level[];
   suitableArenaIds: Id[];
+  /** Safety limits; undefined means none recorded. */
+  maxRiderWeightKg?: number;
+  minRiderAge?: number;
+  /** Kinds of work this horse does; empty or undefined means any. */
+  formats?: string[];
+  /** This horse's own workload limits, used instead of the club's when set. */
+  maxSessionsPerDay?: number;
+  maxSessionsPerWeek?: number;
 }
 
 export interface HorseAssignment {

@@ -1,11 +1,12 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { ACCOUNT_STATUS, BEARER_PREFIX } from '../config/constants.ts';
+import { ACCOUNT_STATUS, BEARER_PREFIX, CLIENT_HEADER, CLIENT_WEB } from '../config/constants.ts';
 import { APP_CONFIG } from '../config/env.ts';
 import type { AppConfig } from '../config/env.ts';
 import { DbService } from '../db/db.service.ts';
 import { ALLOW_WITHOUT_MFA, IS_PUBLIC, ROLES_KEY } from './decorators.ts';
 import type { AuthUser } from './decorators.ts';
+import { actingRole } from './titles.ts';
 import { TokenService } from './tokens.ts';
 
 /**
@@ -49,7 +50,8 @@ export class AuthGuard implements CanActivate {
 
     const mfaEnabled = a.mfa_enabled === true;
     const mfaEnrollmentRequired = !mfaEnabled && this.config.auth.mfaRequiredRoles.includes(a.role);
-    const user: AuthUser = { id: a.id, role: a.role, fullName: a.full_name, branchIds: a.branch_ids, mfaEnabled, mfaEnrollmentRequired };
+    const acting = actingRole(a.role, req.method, req.path);
+    const user: AuthUser = { id: a.id, title: a.role, role: acting ?? a.role, fullName: a.full_name, branchIds: a.branch_ids, mfaEnabled, mfaEnrollmentRequired, source: req.headers[CLIENT_HEADER] === CLIENT_WEB ? 'staff portal' : 'api' };
     req.user = user;
     // The club requires two-step sign-in for this role and it is not set up: nothing works except setting it up. Checked on every request,
     // so a change of policy applies at once.
@@ -57,6 +59,7 @@ export class AuthGuard implements CanActivate {
       throw new ForbiddenException({ message: 'Your role must use two-step sign-in. Set it up first.', problems: [{ code: 'MFA_ENROLLMENT_REQUIRED', message: 'Set up two-step sign-in to continue.' }] });
     }
 
+    if (acting === null) throw new ForbiddenException('Your role cannot do this.');
     const roles = this.reflector.getAllAndOverride<string[] | undefined>(ROLES_KEY, targets);
     if (roles && !roles.includes(user.role)) throw new ForbiddenException('Your role cannot do this.');
     return true;

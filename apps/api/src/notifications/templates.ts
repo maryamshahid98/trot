@@ -11,6 +11,8 @@ export type NotifyEvent =
   | 'payment.refunded'
   | 'booking.cancelled'
   | 'class.cancelled'
+  | 'class.changed'
+  | 'auth.reset_code'
   | 'waitlist.offered'
   | 'class.reminder'
   | 'package.low_balance'
@@ -30,6 +32,8 @@ export const EVENT_KIND: Record<NotifyEvent, 'essential' | 'reminder'> = {
   'payment.refunded': 'essential',
   'booking.cancelled': 'essential',
   'class.cancelled': 'essential',
+  'class.changed': 'essential',
+  'auth.reset_code': 'essential',
   'waitlist.offered': 'essential',
   'class.reminder': 'reminder',
   'package.low_balance': 'reminder',
@@ -64,6 +68,14 @@ export function money(minor: unknown, ctx: RenderContext): string {
 type Template = (d: NotifyData, ctx: RenderContext) => Rendered;
 
 const EN: Record<NotifyEvent, Template> = {
+  'auth.reset_code': (d) => ({
+    subject: 'Your code to choose a new password',
+    body: `Hello,\n\nYour code is ${text(d.code)}. It works for ${text(d.minutes, '15')} minutes.\n\nIf you did not ask for it, you can ignore this message.`,
+  }),
+  'class.changed': (d, c) => ({
+    subject: `Change to ${text(d.title)}`,
+    body: `Hello,\n\nThe plan for ${text(d.title)} has changed. It is now on ${when(d.startsAt, c)} at ${text(d.arena)}. ${text(d.riderName, 'Your rider')} is still booked.\n\nContact the club if this does not suit you.`,
+  }),
   'booking.confirmed': (d, c) => ({
     subject: `Booking confirmed: ${text(d.title)}`,
     body: `Hello,\n\n${text(d.riderName, 'Your rider')} is booked for ${text(d.title)} on ${when(d.startsAt, c)}.\n\nSee you there.`,
@@ -122,4 +134,16 @@ const TEMPLATES: Record<Locale, Record<NotifyEvent, Template>> = { en: EN, ar: E
 
 export function render(event: NotifyEvent, data: NotifyData, ctx: RenderContext): Rendered {
   return TEMPLATES[ctx.locale][event](data, ctx);
+}
+
+/** The words a branch may use in its own wording. Anything else in braces is left as typed. */
+export const PLACEHOLDERS = ['riderName', 'title', 'when', 'arena', 'amount', 'reason'] as const;
+
+export function fill(t: { subject: string; body: string }, d: NotifyData, ctx: RenderContext): Rendered {
+  const values: Record<string, string> = {
+    riderName: text(d.riderName, 'Your rider'), title: text(d.title), when: d.startsAt ? when(d.startsAt, ctx) : '', arena: text(d.arena),
+    amount: d.amountMinor === undefined || d.amountMinor === null ? '' : money(d.amountMinor, ctx), reason: text(d.reason),
+  };
+  const put = (s: string) => s.replace(/\{(\w+)\}/g, (all, k: string) => (Object.hasOwn(values, k) ? values[k] : all));
+  return { subject: put(t.subject), body: put(t.body) };
 }

@@ -12,3 +12,9 @@ export const ChangePasswordBody = z
     newPassword: z.string().min(LIMITS.newPasswordMin, `must be at least ${LIMITS.newPasswordMin} characters`).max(LIMITS.newPasswordMax),
   })
   .refine((v) => v.newPassword !== v.currentPassword, { message: 'must be different from the current password', path: ['newPassword'] });
+
+export const ForgotBody = z.object({ identifier: z.string().trim().min(LIMITS.identifierMin).max(LIMITS.identifierMax) });
+export const ResetBody = ForgotBody.extend({
+  code: z.string().trim().regex(/^\d{6}$/, 'must be the 6 digits you were sent'),
+  newPassword: z.string().min(LIMITS.newPasswordMin, `must be at least ${LIMITS.newPasswordMin} characters`).max(LIMITS.newPasswordMax),
+});

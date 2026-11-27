@@ -14,7 +14,9 @@ import { issueReceipt } from './receipts.ts';
 import { pgErrorCode } from '../common/errors.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
-const TYPE_COLS = `pt.id, pt.name, pt.classes, pt.price_minor AS "priceMinor", pt.valid_days AS "validDays", pt.class_formats::text[] AS "classFormats", pt.active`;
+const TYPE_COLS = `pt.id, pt.name, pt.classes, pt.price_minor AS "priceMinor", pt.valid_days AS "validDays", pt.class_formats::text[] AS "classFormats", pt.active,
+  pt.ride_type_ids AS "rideTypeIds", pt.arena_ids AS "arenaIds", pt.levels::text[] AS levels, to_char(pt.from_time, 'HH24:MI') AS "fromTime", to_char(pt.to_time, 'HH24:MI') AS "toTime", pt.family`;
+const LIMIT_COLUMNS: Record<string, [string, string]> = { rideTypeIds: ['ride_type_ids', '::uuid[]'], arenaIds: ['arena_ids', '::uuid[]'], levels: ['levels', '::level[]'], fromTime: ['from_time', ''], toTime: ['to_time', ''], family: ['family', ''] };
 const MS_DAY = 86_400_000;
 
 @Injectable()
@@ -40,6 +42,9 @@ export class PackagesService {
           branchId, b.name, b.classes, b.priceMinor, b.validDays, b.classFormats,
         ])
       ).rows[0].id;
+      const given = b as Record<string, unknown>;
+      const keys = Object.keys(LIMIT_COLUMNS).filter((k) => given[k] !== undefined);
+      if (keys.length) await c.query(`UPDATE package_types SET ${keys.map((k, i) => `${LIMIT_COLUMNS[k][0]} = $${i + 2}${LIMIT_COLUMNS[k][1]}`).join(', ')} WHERE id = $1`, [id, ...keys.map((k) => given[k])]);
       await writeAudit(c, user, branchId, AUDIT.PACKAGE_TYPE_CREATE, ENTITY.PACKAGE_TYPE, id, { name: b.name, classes: b.classes, priceMinor: b.priceMinor });
       return { id };
     });
@@ -60,6 +65,11 @@ export class PackagesService {
         params.push(b[key]);
         sets.push(`${col} = $${params.length}${key === 'classFormats' ? '::class_format[]' : ''}`);
       }
+      for (const [key, [col, cast]] of Object.entries(LIMIT_COLUMNS)) {
+        if (b[key] === undefined) continue;
+        params.push(b[key]);
+        sets.push(`${col} = $${params.length}${cast}`);
+      }
       await c.query(`UPDATE package_types SET ${sets.join(', ')} WHERE id = $1`, params);
       await writeAudit(c, user, t.branchId, AUDIT.PACKAGE_TYPE_UPDATE, ENTITY.PACKAGE_TYPE, id, b);
       return (await c.query(`SELECT ${TYPE_COLS} FROM package_types pt WHERE pt.id = $1`, [id])).rows[0];
@@ -73,9 +83,11 @@ export class PackagesService {
       await this.rider(c, id, user, false);
       const rows = (
         await c.query(
-          `SELECT rp.id, rp.status, rp.purchased_at AS "purchasedAt", rp.valid_until AS "validUntil", pt.name, pt.class_formats::text[] AS "classFormats",
+          `SELECT rp.id, rp.status, rp.purchased_at AS "purchasedAt", rp.valid_until AS "validUntil", pt.name, pt.class_formats::text[] AS "classFormats", pt.ride_type_ids AS "rideTypeIds", pt.family,
                   coalesce((SELECT sum(l.delta) FROM package_ledger l WHERE l.rider_package_id = rp.id), 0)::int AS balance
-             FROM rider_packages rp JOIN package_types pt ON pt.id = rp.package_type_id WHERE rp.rider_id = $1 ORDER BY rp.purchased_at DESC`,
+             FROM rider_packages rp JOIN package_types pt ON pt.id = rp.package_type_id
+            WHERE rp.rider_id = $1 OR (pt.family AND EXISTS (SELECT 1 FROM guardian_riders a JOIN guardian_riders z ON z.guardian_account_id = a.guardian_account_id WHERE a.rider_id = rp.rider_id AND z.rider_id = $1))
+            ORDER BY rp.purchased_at DESC`,
           [id],
         )
       ).rows;
@@ -117,13 +129,13 @@ export class PackagesService {
       if (!type || !type.active || type.branchId !== rider.branchId) throw new UnprocessableEntityException(problem('That package is not on sale for this rider\'s branch.', PAYMENT_PROBLEM.PACKAGE_TYPE_UNAVAILABLE));
       // The desk types the amount it collected; it must match the price so a typo cannot create a wrong receipt.
       if (b.amountMinor !== undefined && b.amountMinor !== type.priceMinor) {
-        throw new UnprocessableEntityException(problem(`The price is ${type.priceMinor} halalas.`, PAYMENT_PROBLEM.AMOUNT_MISMATCH));
+        throw new UnprocessableEntityException(problem(`The price is ${(type.priceMinor / 100).toFixed(2)}.`, PAYMENT_PROBLEM.AMOUNT_MISMATCH));
       }
       const validUntil = new Date(Date.now() + type.validDays * MS_DAY).toISOString();
       const pk = (await c.query(`INSERT INTO rider_packages (rider_id, package_type_id, status, valid_until) VALUES ($1,$2,$3,$4) RETURNING id`, [riderId, type.id, PACKAGE_STATUS.ACTIVE, validUntil])).rows[0];
       await c.query(`INSERT INTO package_ledger (rider_package_id, delta, reason, ref_key, by_account) VALUES ($1,$2,$3,$4,$5)`, [pk.id, type.classes, LEDGER_REASON.PURCHASE, `purchase:${pk.id}`, user.id]);
       // A free package has nothing to receipt.
-      const receipt = type.priceMinor > 0 ? await issueReceipt(c, { branchId: rider.branchId, riderId, amountMinor: type.priceMinor, method: b.method, packageId: pk.id, userId: user.id }) : null;
+      const receipt = type.priceMinor > 0 ? await issueReceipt(c, { branchId: rider.branchId, riderId, amountMinor: type.priceMinor, method: b.method, terminalRef: b.terminalRef, packageId: pk.id, userId: user.id }) : null;
       if (receipt) await issuePackageInvoice(c, { branchId: rider.branchId, riderId, packageId: pk.id, description: `${type.name} (${type.classes} classes)`, grossMinor: type.priceMinor, receiptId: receipt.id, userId: user.id });
       await writeAudit(c, user, rider.branchId, AUDIT.PACKAGE_SELL, ENTITY.PACKAGE, pk.id, { riderId, packageTypeId: type.id, receipt: receipt?.number ?? null });
       return { id: pk.id as string, classes: type.classes as number, validUntil, receipt };

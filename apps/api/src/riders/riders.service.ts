@@ -6,10 +6,11 @@ import { parse } from '../common/validate.ts';
 import { ACCOUNT_STATUS, AUDIT, ENTITY, PG_ERROR, RELATION, RIDER_PROBLEM, RIDER_STATUS, ROLE } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
 import {
-  AddGuardian, CreateRider, GuardianParams, IdParam, ListRiders, SetLevel, SetStatus, UpdateRiderCustomer, UpdateRiderStaff,
+  AddGuardian, CreateRider, GuardianParams, IdParam, ListRiders, SetLevel, SetStatus, UpdateGuardian, UpdateRiderCustomer, UpdateRiderStaff,
 } from './riders.schemas.ts';
 import { pgErrorCode } from '../common/errors.ts';
 import type { Tx } from '../common/sql.ts';
+import { NO_MEDICAL } from '../auth/titles.ts';
 
 const isCustomer = (u: AuthUser) => u.role === ROLE.CUSTOMER;
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
@@ -24,7 +25,11 @@ const ageOn = (dob: string) => {
 /** Columns a caller may see on one rider. Medical details only go to the family and the front desk. */
 const DETAIL = `r.id, r.branch_id AS "branchId", r.account_id AS "accountId", r.full_name AS "fullName",
   to_char(r.date_of_birth, 'YYYY-MM-DD') AS "dateOfBirth", r.level, r.status, r.is_walk_in AS "isWalkIn",
-  r.medical_notes AS "medicalNotes", r.allergies, r.emergency_contact AS "emergencyContact", r.created_at AS "createdAt"`;
+  r.medical_notes AS "medicalNotes", r.allergies, r.emergency_contact AS "emergencyContact", r.created_at AS "createdAt",
+  r.height_cm AS "heightCm", r.weight_kg AS "weightKg", r.riding_experience AS "ridingExperience", r.preferences, r.restrictions, r.phone, r.email,
+  to_char(r.restricted_from, 'YYYY-MM-DD') AS "restrictedFrom", to_char(r.restricted_until, 'YYYY-MM-DD') AS "restrictedUntil"`;
+/** Request field -> column for the details above. Only these names ever reach the SQL. */
+const ABOUT: Record<string, string> = { heightCm: 'height_cm', weightKg: 'weight_kg', ridingExperience: 'riding_experience', preferences: 'preferences', restrictions: 'restrictions', phone: 'phone', email: 'email' };
 const SUMMARY = `r.id, r.full_name AS "fullName", to_char(r.date_of_birth, 'YYYY-MM-DD') AS "dateOfBirth", r.level, r.status, r.is_walk_in AS "isWalkIn", r.created_at AS "createdAt"`;
 
 /** Escapes % and _ so a search for "50%" finds "50%", not everything. */
@@ -53,6 +58,10 @@ export class RidersService {
       throw new BadRequestException({ message: 'The request is not valid.', problems: [{ field: 'relation', message: 'say whether this is you (self) or a child you guard (ward)' }] });
     }
 
+    // A walk-in adult has no account to reach them by, so the desk records how to (CUS-009).
+    if (!customer && b.isWalkIn && age >= 18 && !b.phone && !b.email && !b.emergencyContact && !b.guardianAccountId) {
+      throw new BadRequestException({ message: 'The request is not valid.', problems: [{ field: 'phone', message: 'give a phone number or an email for a walk-in rider' }] });
+    }
     try {
       return await this.db.scoped({ branchIds: [branchId], role: user.role }, async (c) => {
         let accountId: string | null = null;
@@ -78,6 +87,13 @@ export class RidersService {
           if (!ok.rowCount) throw new UnprocessableEntityException(problem('That guardian is not a customer of this branch.', RIDER_PROBLEM.GUARDIAN_NOT_ELIGIBLE));
         }
 
+        if (!customer && !b.confirmDuplicate) {
+          const same = await c.query(
+            `SELECT 1 FROM riders WHERE branch_id = $1 AND anonymised_at IS NULL AND lower(btrim(full_name)) = lower($2) AND date_of_birth = $3 LIMIT 1`,
+            [branchId, b.fullName, b.dateOfBirth],
+          );
+          if (same.rowCount) throw new ConflictException(problem('A rider with this name and date of birth already exists. Check the list, or confirm that this is a different person.', 'DUPLICATE_RIDER'));
+        }
         const id: string = (
           await c.query(
             `INSERT INTO riders (branch_id, account_id, full_name, date_of_birth, status, is_walk_in, medical_notes, allergies, emergency_contact)
@@ -85,6 +101,8 @@ export class RidersService {
             [branchId, accountId, b.fullName, b.dateOfBirth, status, !customer && !!b.isWalkIn, b.medicalNotes ?? null, b.allergies ?? null, b.emergencyContact ? JSON.stringify(b.emergencyContact) : null],
           )
         ).rows[0].id;
+        const given = Object.keys(ABOUT).filter((k) => (b as Record<string, unknown>)[k] !== undefined);
+        if (given.length) await c.query(`UPDATE riders SET ${given.map((k, i) => `${ABOUT[k]} = $${i + 2}`).join(', ')} WHERE id = $1`, [id, ...given.map((k) => (b as Record<string, unknown>)[k])]);
         if (guardianId) await c.query(`INSERT INTO guardian_riders (guardian_account_id, rider_id) VALUES ($1,$2)`, [guardianId, id]);
         await c.query(`INSERT INTO rider_level_history (branch_id, rider_id, from_level, to_level, reason, changed_by, note) VALUES ($1,$2,NULL,'beginner','initial',$3,'New rider')`, [branchId, id, user.id]);
         await writeAudit(c, user, branchId, AUDIT.RIDER_CREATE, ENTITY.RIDER, id, { status, relation: b.relation ?? null });
@@ -114,8 +132,9 @@ export class RidersService {
             WHERE r.branch_id = $1 AND r.anonymised_at IS NULL
               AND ($2::text IS NULL OR r.full_name ILIKE $2 ESCAPE '\\')
               AND ($3::rider_status IS NULL OR r.status = $3)
+              AND ($6::uuid IS NULL OR EXISTS (SELECT 1 FROM bookings k JOIN occurrences o ON o.id = k.occurrence_id WHERE k.rider_id = r.id AND o.coach_id = $6 AND k.status <> 'cancelled'))
             ORDER BY r.full_name, r.id LIMIT $4 OFFSET $5`,
-          [branchId, q.q ? likePattern(q.q) : null, q.status ?? null, q.limit, q.offset],
+          [branchId, q.q ? likePattern(q.q) : null, q.status ?? null, q.limit, q.offset, user.role === ROLE.COACH ? user.id : null],
         )
       ).rows;
       return { total: rows[0]?.total ?? 0, riders: rows.map(({ total: _total, ...r }) => r) };
@@ -124,14 +143,37 @@ export class RidersService {
 
   async get(rawId: string, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    return this.db.scoped({ branchIds: user.branchIds, role: user.role }, (c) => this.load(c, id, user));
+    const rider = await this.db.scoped({ branchIds: user.branchIds, role: user.role }, (c) => this.load(c, id, user));
+    // Planning and finance work does not need anyone's medical details.
+    if (user.title && NO_MEDICAL.includes(user.title)) return { ...rider, medicalNotes: null, allergies: null };
+    return rider;
+  }
+
+  /** Every class and ride this rider has been booked into, newest first, with how it ended. */
+  async history(rawId: string, user: AuthUser) {
+    const { id } = parse(IdParam, { id: rawId });
+    return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+      await this.load(c, id, user, 'r.id');
+      const bookings = (
+        await c.query(
+          `SELECT b.id, b.number, b.status, b.attendance, b.lesson_outcome AS "outcome", b.instructor_notes AS "notes",
+                  (SELECT h.name FROM horses h WHERE h.id = b.actual_horse_id) AS "actualHorse",
+                  (SELECT string_agg(k.name, ', ' ORDER BY k.name) FROM skills k WHERE k.id = ANY(b.skills_practised)) AS skills,
+                  b.pay_with AS "payWith", b.source, b.cancel_cause AS "cancelCause", b.consumed_class AS "consumedClass", o.title, o.format, lower(o.during) AS "startsAt",
+                  (SELECT string_agg(h.name, ', ' ORDER BY h.name) FROM horse_assignments a JOIN horses h ON h.id = a.horse_id WHERE a.occurrence_id = o.id AND a.rider_id = b.rider_id) AS horse
+             FROM bookings b JOIN occurrences o ON o.id = b.occurrence_id WHERE b.rider_id = $1 ORDER BY lower(o.during) DESC LIMIT 200`,
+          [id],
+        )
+      ).rows;
+      return { bookings };
+    });
   }
 
   async update(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
     const b: Record<string, unknown> = parse(isCustomer(user) ? UpdateRiderCustomer : UpdateRiderStaff, body);
     // Whitelist: only these keys ever become column names.
-    const COLUMNS: Record<string, string> = { fullName: 'full_name', dateOfBirth: 'date_of_birth', medicalNotes: 'medical_notes', allergies: 'allergies', emergencyContact: 'emergency_contact' };
+    const COLUMNS: Record<string, string> = { fullName: 'full_name', dateOfBirth: 'date_of_birth', medicalNotes: 'medical_notes', allergies: 'allergies', emergencyContact: 'emergency_contact', ...ABOUT };
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const r = await this.load(c, id, user, 'r.id, r.branch_id AS "branchId", r.status', true);
       if (r.status === RIDER_STATUS.ARCHIVED) throw new ConflictException('This rider has been archived.');
@@ -164,7 +206,8 @@ export class RidersService {
 
   async setStatus(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    const { status, reason } = parse(SetStatus, body);
+    const { status, reason, from, until } = parse(SetStatus, body);
+    if (from && until && until < from) throw new BadRequestException({ message: 'The request is not valid.', problems: [{ field: 'until', message: 'must not be before the first day' }] });
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const r = await this.load(c, id, user, 'r.id, r.branch_id AS "branchId", r.status', true);
       if (r.status === status) throw new ConflictException(problem(`The rider is already ${status}.`, RIDER_PROBLEM.SAME_STATUS));
@@ -178,8 +221,9 @@ export class RidersService {
       if (status !== RIDER_STATUS.ACTIVE && !reason) {
         throw new BadRequestException({ message: 'A reason is required.', problems: [{ field: 'reason', message: 'is required unless approving' }] });
       }
-      await c.query(`UPDATE riders SET status = $2 WHERE id = $1`, [id, status]);
-      await writeAudit(c, user, r.branchId, AUDIT.RIDER_STATUS, ENTITY.RIDER, id, { from: r.status, to: status, reason: reason ?? null });
+      const limited = status === RIDER_STATUS.RESTRICTED || status === RIDER_STATUS.SUSPENDED;
+      await c.query(`UPDATE riders SET status = $2, restricted_from = $3, restricted_until = $4 WHERE id = $1`, [id, status, limited ? (from ?? null) : null, limited ? (until ?? null) : null]);
+      await writeAudit(c, user, r.branchId, AUDIT.RIDER_STATUS, ENTITY.RIDER, id, { from: r.status, to: status, reason: reason ?? null, ...(from ? { effectiveFrom: from } : {}), ...(until ? { effectiveUntil: until } : {}) });
       return { id, status };
     });
   }
@@ -189,7 +233,8 @@ export class RidersService {
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       await this.load(c, id, user, 'r.id');
       const rows = (
-        await c.query(`SELECT a.id AS "accountId", a.full_name AS "fullName", a.email, a.phone FROM guardian_riders g JOIN accounts a ON a.id = g.guardian_account_id WHERE g.rider_id = $1 ORDER BY a.full_name`, [id])
+        await c.query(`SELECT a.id AS "accountId", a.full_name AS "fullName", a.email, a.phone, g.relationship, g.has_authority AS "hasAuthority", g.is_primary AS "isPrimary", g.is_billing AS "isBilling", g.is_emergency AS "isEmergency"
+                         FROM guardian_riders g JOIN accounts a ON a.id = g.guardian_account_id WHERE g.rider_id = $1 ORDER BY g.is_primary DESC, a.full_name`, [id])
       ).rows;
       return { guardians: rows };
     });
@@ -197,7 +242,7 @@ export class RidersService {
 
   async addGuardian(rawId: string, body: unknown, user: AuthUser) {
     const { id } = parse(IdParam, { id: rawId });
-    const { accountId } = parse(AddGuardian, body);
+    const { accountId, ...flags } = parse(AddGuardian, body);
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const r = await this.load(c, id, user, 'r.id, r.branch_id AS "branchId"', true);
       const ok = await c.query(
@@ -207,7 +252,29 @@ export class RidersService {
       if (!ok.rowCount) throw new UnprocessableEntityException(problem('That person is not a customer of this branch.', RIDER_PROBLEM.GUARDIAN_NOT_ELIGIBLE));
       const ins = await c.query(`INSERT INTO guardian_riders (guardian_account_id, rider_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [accountId, id]);
       if (!ins.rowCount) throw new ConflictException('That person is already a guardian of this rider.');
-      await writeAudit(c, user, r.branchId, AUDIT.GUARDIAN_ADD, ENTITY.RIDER, id, { accountId });
+      if (Object.keys(flags).length) await this.setFlags(c, id, accountId, flags);
+      await writeAudit(c, user, r.branchId, AUDIT.GUARDIAN_ADD, ENTITY.RIDER, id, { accountId, ...flags });
+      return { riderId: id, accountId };
+    });
+  }
+
+  /** One primary and one billing contact at most: naming a new one takes the mark off the old one. */
+  private async setFlags(c: Tx, riderId: string, accountId: string, flags: Record<string, unknown>) {
+    const columns: Record<string, string> = { relationship: 'relationship', hasAuthority: 'has_authority', isPrimary: 'is_primary', isBilling: 'is_billing', isEmergency: 'is_emergency' };
+    if (flags.isPrimary === true) await c.query(`UPDATE guardian_riders SET is_primary = false WHERE rider_id = $1`, [riderId]);
+    if (flags.isBilling === true) await c.query(`UPDATE guardian_riders SET is_billing = false WHERE rider_id = $1`, [riderId]);
+    const keys = Object.keys(flags).filter((k) => k in columns && flags[k] !== undefined);
+    if (!keys.length) return 0;
+    return (await c.query(`UPDATE guardian_riders SET ${keys.map((k, i) => `${columns[k]} = $${i + 3}`).join(', ')} WHERE rider_id = $1 AND guardian_account_id = $2`, [riderId, accountId, ...keys.map((k) => flags[k])])).rowCount;
+  }
+
+  async updateGuardian(rawId: string, rawAccountId: string, body: unknown, user: AuthUser) {
+    const { id, accountId } = parse(GuardianParams, { id: rawId, accountId: rawAccountId });
+    const flags = parse(UpdateGuardian, body);
+    return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+      const r = await this.load(c, id, user, 'r.id, r.branch_id AS "branchId"', true);
+      if (!(await this.setFlags(c, id, accountId, flags))) throw new NotFoundException('That person is not a guardian of this rider.');
+      await writeAudit(c, user, r.branchId, 'guardian.update', ENTITY.RIDER, id, { accountId, ...flags });
       return { riderId: id, accountId };
     });
   }

@@ -6,13 +6,16 @@ import { writeAudit } from '../common/audit.ts';
 import { branchFor } from '../common/branch.ts';
 import { epochMs } from '../common/sql.ts';
 import { parse } from '../common/validate.ts';
-import { ADMIN_PROBLEM, AUDIT, ENTITY, LIMITS, OCCURRENCE_STATUS } from '../config/constants.ts';
+import { ADMIN_PROBLEM, AUDIT, ENTITY, LIMITS, OCCURRENCE_STATUS, PG_ERROR } from '../config/constants.ts';
+import { pgErrorCode } from '../common/errors.ts';
 import { DbService } from '../db/db.service.ts';
 import { ClosureParams, CreateArena, CreateClosure, IdParam, ListArenas, UpdateArena } from './branches.schemas.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
 const iso = (ms: number) => new Date(ms).toISOString();
-const COLS = `a.id, a.name, a.max_capacity AS "maxCapacity"`;
+const COLS = `a.id, a.name, a.max_capacity AS "maxCapacity", a.supported_levels::text[] AS "supportedLevels", a.kind, a.surface, a.activities, a.length_m::float AS "lengthM", a.width_m::float AS "widthM", a.shared_use AS "sharedUse",
+  to_char(a.opens_at, 'HH24:MI') AS "opensAt", to_char(a.closes_at, 'HH24:MI') AS "closesAt"`;
+const DETAILS: Record<string, string> = { kind: 'kind', surface: 'surface', activities: 'activities', lengthM: 'length_m', widthM: 'width_m', sharedUse: 'shared_use', opensAt: 'opens_at', closesAt: 'closes_at' };
 
 @Injectable()
 export class ArenasService {
@@ -32,6 +35,17 @@ export class ArenasService {
     ).rows.map((r) => ({ id: r.id, title: r.title, startsAt: Number(r.startsAt) }));
   }
 
+  private async saveDetails(c: Tx, id: string, b: Record<string, unknown>) {
+    const keys = Object.keys(DETAILS).filter((k) => b[k] !== undefined);
+    if (!keys.length) return;
+    try {
+      await c.query(`UPDATE arenas SET ${keys.map((k, i) => `${DETAILS[k]} = $${i + 2}`).join(', ')} WHERE id = $1`, [id, ...keys.map((k) => b[k])]);
+    } catch (e: unknown) {
+      if (pgErrorCode(e) === PG_ERROR.CHECK_VIOLATION) throw new BadRequestException({ message: 'Give both an opening and a later closing time, or neither.', problems: [{ field: 'closesAt', message: 'must be after the opening time' }] });
+      throw e;
+    }
+  }
+
   async list(query: unknown, user: AuthUser) {
     const q = parse(ListArenas, query);
     const branchId = branchFor(q.branchId, user);
@@ -46,6 +60,8 @@ export class ArenasService {
     return this.db.scoped({ branchIds: [branchId], role: user.role }, async (c) => {
       if (await this.nameTaken(c, branchId, b.name)) throw new ConflictException(problem('An arena with that name already exists in this branch.', ADMIN_PROBLEM.NAME_TAKEN));
       const id: string = (await c.query(`INSERT INTO arenas (branch_id, name, max_capacity) VALUES ($1,$2,$3) RETURNING id`, [branchId, b.name, b.maxCapacity])).rows[0].id;
+      await this.saveDetails(c, id, b);
+      if (b.supportedLevels) await c.query(`UPDATE arenas SET supported_levels = $2::level[] WHERE id = $1`, [id, b.supportedLevels]);
       await writeAudit(c, user, branchId, AUDIT.ARENA_CREATE, ENTITY.ARENA, id, { name: b.name, maxCapacity: b.maxCapacity });
       return { id };
     });
@@ -62,7 +78,8 @@ export class ArenasService {
         const over = await c.query(`SELECT id, title FROM occurrences WHERE arena_id = $1 AND status <> $2 AND upper(during) > now() AND capacity > $3 LIMIT $4`, [id, OCCURRENCE_STATUS.CANCELLED, b.maxCapacity, LIMITS.affectedClassesShown]);
         if (over.rowCount) throw new ConflictException({ ...problem('Classes ahead have more places than that. Change those classes first.', ADMIN_PROBLEM.ARENA_HAS_CLASSES), classes: over.rows });
       }
-      await c.query(`UPDATE arenas SET name = coalesce($2, name), max_capacity = coalesce($3, max_capacity) WHERE id = $1`, [id, b.name ?? null, b.maxCapacity ?? null]);
+      await c.query(`UPDATE arenas SET name = coalesce($2, name), max_capacity = coalesce($3, max_capacity), supported_levels = coalesce($4::level[], supported_levels) WHERE id = $1`, [id, b.name ?? null, b.maxCapacity ?? null, b.supportedLevels ?? null]);
+      await this.saveDetails(c, id, b);
       await writeAudit(c, user, a.branchId, AUDIT.ARENA_UPDATE, ENTITY.ARENA, id, { from: { name: a.name, maxCapacity: a.maxCapacity }, to: { name: b.name ?? a.name, maxCapacity: b.maxCapacity ?? a.maxCapacity } });
       return (await c.query(`SELECT ${COLS} FROM arenas a WHERE a.id = $1`, [id])).rows[0];
     });

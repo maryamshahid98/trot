@@ -16,6 +16,9 @@ export class AccountsController {
   constructor(@Inject(AccountsService) private readonly accounts: AccountsService) {}
   @Get() @Roles(...MANAGERS) list(@Query() q: unknown, @CurrentUser() u: AuthUser) { return this.accounts.list(q, u); }
   @Post() @Roles(...MANAGERS) create(@Body() b: unknown, @CurrentUser() u: AuthUser) { return this.accounts.create(b, u); }
+  /** Declared before ':id' so "customers" is never read as an id. */
+  @Get('customers') @Roles(ROLE.RECEPTION, ...MANAGERS) customers(@Query() q: unknown, @CurrentUser() u: AuthUser) { return this.accounts.searchCustomers(q, u); }
+  @Post('customers') @Roles(ROLE.RECEPTION, ...MANAGERS) createCustomer(@Body() b: unknown, @CurrentUser() u: AuthUser) { return this.accounts.createCustomer(b, u); }
   @Get(':id') @Roles(...MANAGERS) get(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.accounts.get(id, u); }
   @Patch(':id') @Roles(...MANAGERS) update(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.accounts.update(id, b, u); }
   @Post(':id/role') @Roles(...MANAGERS) role(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.accounts.setRole(id, b, u); }
@@ -26,10 +29,18 @@ export class AccountsController {
   @Put(':id/branches') @Roles(...MANAGERS) branches(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.accounts.setBranches(id, b, u); }
 }
 
+@Controller('organisation')
+export class OrganisationController {
+  constructor(@Inject(BranchesService) private readonly branches: BranchesService) {}
+  @Get() @Roles(...STAFF) get(@CurrentUser() u: AuthUser) { return this.branches.organisation(u); }
+  @Patch() @Roles(ROLE.OWNER) update(@Body() b: unknown, @CurrentUser() u: AuthUser) { return this.branches.updateOrganisation(b, u); }
+}
+
 @Controller('branches')
 export class BranchesController {
   constructor(@Inject(BranchesService) private readonly branches: BranchesService) {}
   @Get() list(@CurrentUser() u: AuthUser) { return this.branches.list(u); }
+  @Post() @Roles(ROLE.OWNER) create(@Body() b: unknown, @CurrentUser() u: AuthUser) { return this.branches.create(b, u); }
   @Get(':id') get(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.branches.get(id, u); }
   @Patch(':id') @Roles(...MANAGERS) update(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.branches.update(id, b, u); }
   @Get(':id/policy') @Roles(...STAFF) policy(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.branches.getPolicy(id, u); }
@@ -60,4 +71,6 @@ export class LeaveController {
 export class StaffController {
   constructor(@Inject(StaffService) private readonly staff: StaffService) {}
   @Get() @Roles(ROLE.RECEPTION, ...MANAGERS) list(@Query() q: unknown, @CurrentUser() u: AuthUser) { return this.staff.list(q, u); }
+  @Get(':id/profile') @Roles(...STAFF) profile(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.staff.profile(id, u); }
+  @Put(':id/profile') @Roles(...MANAGERS) saveProfile(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.staff.saveProfile(id, b, u); }
 }

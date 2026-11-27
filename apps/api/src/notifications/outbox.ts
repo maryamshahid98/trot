@@ -1,7 +1,7 @@
 // Queuing messages. These are plain functions that take the caller's open transaction, so a message is saved (or not) together with the
 // change that caused it. Nothing here sends anything: see NotificationsService for the sending.
 import type { Tx } from '../common/sql.ts';
-import { EVENT_KIND, render } from './templates.ts';
+import { EVENT_KIND, fill, render } from './templates.ts';
 import type { Locale, NotifyData, NotifyEvent } from './templates.ts';
 
 interface Recipient { id: string; email: string | null; phone: string | null; locale: Locale; emailEnabled: boolean; smsEnabled: boolean }
@@ -39,9 +39,12 @@ async function queue(c: Tx, req: QueueRequest, recipients: Recipient[], riderNam
     const o = (await c.query(`SELECT o.title, lower(o.during) AS "startsAt", a.name AS arena FROM occurrences o JOIN arenas a ON a.id = o.arena_id WHERE o.id = $1`, [req.occurrenceId])).rows[0];
     if (o) details = { title: o.title, startsAt: new Date(o.startsAt).toISOString(), arena: o.arena };
   }
+  const own = (await c.query(`SELECT subject, body FROM notification_templates WHERE branch_id = $1 AND event = $2`, [req.branchId, req.event])).rows[0] as { subject: string; body: string } | undefined;
   let queued = 0;
   for (const r of recipients) {
-    const message = render(req.event, { riderName, ...details, ...req.data }, { locale: r.locale, timeZone: branch.timeZone as string, currency: branch.currency as string });
+    const ctx = { locale: r.locale, timeZone: branch.timeZone as string, currency: branch.currency as string };
+    const data: NotifyData = { riderName, ...details, ...req.data };
+    const message = own ? fill(own, data, ctx) : render(req.event, data, ctx);
     for (const channel of channelsFor(kind, r)) {
       const res = await c.query(
         `INSERT INTO notification_outbox (branch_id, account_id, event, channel, to_address, locale, subject, body, dedupe_key)

@@ -71,7 +71,9 @@ export class InvoicesService {
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const inv = (
         await c.query(
-          `SELECT ${COLS}, br.name AS "branchName", pa.full_name AS "payerName" ${FROM} JOIN branches br ON br.id = i.branch_id LEFT JOIN accounts pa ON pa.id = i.payer_account_id
+          `SELECT ${COLS}, br.name AS "branchName", pa.full_name AS "payerName", coalesce(org.legal_name, org.name) AS "sellerName", org.tax_number AS "sellerTaxNumber",
+                  coalesce(br.address, org.address) AS "sellerAddress", org.phone AS "sellerPhone", org.email AS "sellerEmail", org.logo_url AS "sellerLogo"
+             ${FROM} JOIN branches br ON br.id = i.branch_id JOIN organisations org ON org.id = br.organisation_id LEFT JOIN accounts pa ON pa.id = i.payer_account_id
             WHERE i.id = $1 AND ($2::boolean = false OR ${OWNS_RIDER('r', '$3')})`,
           [id, family, user.id],
         )

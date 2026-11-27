@@ -355,14 +355,14 @@ describe('receipts', () => {
 
   test('staff list and filter receipts; customers and strangers cannot', async () => {
     const a = await paidReceipt(20000, 'cash');
-    await paidReceipt(30000, 'bank_transfer');
+    await paidReceipt(30000, 'card_at_desk');
     const rec = await staff();
     assert.equal((await get('/receipts')).status, 401);
     assert.equal((await get('/receipts', a.token)).status, 403);
     const byRider = await get(`/receipts?riderId=${a.riderId}`, rec.token);
     assert.equal(byRider.status, 200);
     assert.deepEqual([byRider.body.total, byRider.body.receipts[0].number], [1, a.number]);
-    assert.ok((await get('/receipts?method=bank_transfer', rec.token)).body.receipts.every((r: Json) => r.method === 'bank_transfer'));
+    assert.ok((await get('/receipts?method=card_at_desk', rec.token)).body.receipts.every((r: Json) => r.method === 'card_at_desk'));
     assert.equal((await get('/receipts?from=2999-01-01', rec.token)).body.total, 0);
     assert.ok((await get('/receipts?limit=1', rec.token)).body.receipts.length === 1);
     for (const qs of ['limit=0', 'limit=999', 'offset=-1', 'method=gold', 'from=yesterday', 'riderId=x', 'branchId=x']) assert.equal((await get(`/receipts?${qs}`, rec.token)).status, 400, qs);

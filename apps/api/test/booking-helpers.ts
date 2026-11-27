@@ -11,7 +11,7 @@ export const LONG_LIVED_UNTIL = '2060-01-01';
 export async function makeRider(o: { branchId?: string; accountId?: string | null; dob?: string; status?: string; level?: string; name?: string } = {}): Promise<string> {
   return (
     await ctx.admin.query(
-      `INSERT INTO riders (branch_id, account_id, full_name, date_of_birth, level, status) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+      `INSERT INTO riders (branch_id, account_id, full_name, date_of_birth, level, status, emergency_contact) VALUES ($1,$2,$3,$4,$5,$6,'{"name":"Parent","phone":"+966500000000"}') RETURNING id`,
       [o.branchId ?? BRANCH, o.accountId ?? null, o.name ?? 'Test Rider', o.dob ?? '1990-01-01', o.level ?? 'beginner', o.status ?? 'active'],
     )
   ).rows[0].id;

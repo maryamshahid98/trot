@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Put, Query } from '@nestjs/common';
 import { CurrentUser, Roles } from '../auth/decorators.ts';
 import type { AuthUser } from '../auth/decorators.ts';
 import { ROLE } from '../config/constants.ts';
@@ -23,8 +23,17 @@ export class BookingsController {
   @Post(':id/cancel') @Roles(...FAMILY_AND_STAFF)
   cancel(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.svc.cancel(id, body, user); }
 
+  @Get(':id/cancel-preview') @Roles(...STAFF)
+  preview(@Param('id') id: string, @Query() query: unknown, @CurrentUser() user: AuthUser) { return this.svc.cancelPreview(id, query, user); }
+
   @Post(':id/check-in') @Roles(...RUNNERS)
   checkIn(@Param('id') id: string, @CurrentUser() user: AuthUser) { return this.attendance.checkIn(id, user); }
+
+  @Put(':id/record') @Roles(...RUNNERS)
+  record(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.attendance.record(id, body, user); }
+
+  @Post(':id/attendance') @Roles(...RUNNERS)
+  mark(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.attendance.attendance(id, body, user); }
 
   @Post(':id/no-show') @Roles(...RUNNERS)
   noShow(@Param('id') id: string, @CurrentUser() user: AuthUser) { return this.attendance.noShow(id, user); }
