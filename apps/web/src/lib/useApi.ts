@@ -34,10 +34,18 @@ export const qs = (params: Record<string, string | number | boolean | null | und
   return s ? `?${s}` : '';
 };
 
+/** "emergencyContact.phone" -> "Emergency contact phone". */
+const fieldName = (f: string) => {
+  const words = f.replace(/Minor$/, '').replace(/Id$/, '').replace(/\./g, ' ').replace(/([A-Z])/g, ' $1').toLowerCase().trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
 export const errorText = (e: unknown): string => {
   if (e instanceof ApiError) {
-    const extra = e.problems.length ? ` ${e.problems.map((p) => (p.field ? `${p.field} ${p.message}` : p.message)).join('; ')}` : '';
-    return `${e.message}${extra}`;
+    // Each thing is said once: a problem that only repeats the headline is dropped.
+    const lines = [...new Set(e.problems.map((p) => (p.field && p.message !== e.message ? `${fieldName(p.field)}: ${p.message}` : p.message)))].filter((m) => m && m !== e.message);
+    if (e.message === 'The request is not valid.' && lines.length) return `Please check. ${lines.join('; ')}`;
+    return [e.message, ...lines].join(' ');
   }
-  return 'Cannot reach the server.';
+  return e instanceof Error && e.message ? e.message : 'Cannot reach the server.';
 };

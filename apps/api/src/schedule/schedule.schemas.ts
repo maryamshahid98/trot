@@ -22,6 +22,8 @@ export const CreateClass = z.object({
   endsAt: isoTime,
   capacity: z.number().int(),
   priceMinor: z.number().int().min(0).default(0),
+  /** The catalogue entry this class is made from: its age limits, cancellation rule and one-off flag are copied. */
+  classTypeId: uuid.optional(),
   // Who is overriding is the signed-in user, never a field the caller can fill in.
   override: z.object({ reason: z.string().trim().min(1, 'a reason is required').max(LIMITS.overrideReasonMax) }).optional(),
 });
@@ -40,3 +42,15 @@ export const CreateSeries = CreateClass.extend({
   /** Check only: report what would happen without saving anything. */
   dryRun: z.boolean().default(false),
 });
+
+const override = z.object({ reason: z.string().trim().min(1, 'a reason is required').max(LIMITS.overrideReasonMax) }).optional();
+export const OccurrenceId = z.object({ id: uuid });
+/** Any of these may change while the session has not started. Rides keep their type's price, level and length. */
+export const UpdateOccurrence = z
+  .object({
+    title: z.string().trim().min(1).max(LIMITS.titleMax), arenaId: uuid, coachId: uuid, minLevel: z.enum(LEVELS),
+    startsAt: isoTime, endsAt: isoTime, capacity: z.number().int(), priceMinor: z.number().int().min(0).max(LIMITS.priceMaxMinor), override,
+  })
+  .partial()
+  .refine((v) => Object.keys(v).some((k) => k !== 'override'), 'send at least one field to change');
+export const PublishOccurrence = z.object({ override });

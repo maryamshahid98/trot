@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { api, post } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
-import { ASSIGNABLE_ROLES, LOCALE, MANAGER_ROLES } from '../constants';
+import { ASSIGNABLE_ROLES, LOCALE, MANAGER_ROLES, ROLE_RANK } from '../constants';
 import type { Role } from '../constants';
 import { useBranch } from '../lib/branch';
 import { fmtDateTime, label, zonedToIso } from '../lib/format';
@@ -9,16 +9,21 @@ import { qs, useQuery } from '../lib/useApi';
 import { FormDialog } from '../ui/FormDialog';
 import { Badge, Btn, Card, Confirm, Load, PageHead, Table, Tabs, useAct } from '../ui/kit';
 import { opts } from '../ui/pickers';
+import { StaffProfileDialog } from './StaffProfile';
+import { tr } from '../i18n';
 
 interface Account { id: string; fullName: string; email: string; phone: string | null; role: string; status: string; branchIds?: string[] }
 interface Leave { id: string; staffId: string; staffName?: string; status: string; from: number; to: number; reason?: string | null }
-type F = null | 'new' | 'leave' | { role: Account } | { status: Account } | { reset: Account } | { mfa: Account } | { branches: Account } | { decide: Leave } | { cancel: Leave };
+type F = null | 'new' | 'leave' | { role: Account } | { status: Account } | { reset: Account } | { mfa: Account } | { branches: Account } | { decide: Leave } | { cancel: Leave } | { profile: Account };
 
 export function Staff() {
   const { user, branches } = useAuth();
   const { branchId, branch } = useBranch();
   const role = user!.role as Role;
   const manager = MANAGER_ROLES.includes(role);
+  const myRank = ROLE_RANK[user!.title ?? role] ?? 0;
+  const roleOptions = opts(ASSIGNABLE_ROLES.filter((r) => ROLE_RANK[r] < myRank));
+  const canManage = (a: Account) => a.id !== user!.id && (ROLE_RANK[a.role] ?? 0) < myRank;
   const act = useAct();
   const [tab, setTab] = useState<'accounts' | 'leave'>(manager ? 'accounts' : 'leave');
   const [f, setF] = useState<F>(null);
@@ -38,8 +43,8 @@ export function Staff() {
             <div className="filters"><input aria-label="Search accounts" placeholder="Search by name or email" value={q} onChange={(e) => setQ(e.target.value)} /></div>
             <Load q={accounts}>{(d) => <Table rowKey={(a) => a.id} rows={d.accounts} empty="No accounts." cols={[
               { head: 'Name', cell: (a) => <b>{a.fullName}</b>, width: '1.4fr' }, { head: 'Email', cell: (a) => a.email, width: '1.6fr' }, { head: 'Role', cell: (a) => label(a.role), width: '0.8fr' }, { head: 'Status', cell: (a) => <Badge value={a.status} />, width: '0.8fr' },
-              { head: '', width: '3.4fr', right: true, cell: (a) => a.role === 'customer' ? null : (
-                <span className="actions"><Btn small onClick={() => setF({ role: a })}>Role</Btn><Btn small onClick={() => setF({ status: a })}>Status</Btn><Btn small onClick={() => setF({ branches: a })}>Branches</Btn>
+              { head: '', width: '3.4fr', right: true, cell: (a) => a.role === 'customer' ? null : !canManage(a) ? <span className="sub">{tr(a.id === user!.id ? 'Your own account' : 'Only a higher role can change this account')}</span> : (
+                <span className="actions">{a.role === 'coach' && <Btn small kind="primary" onClick={() => setF({ profile: a })}>Qualifications</Btn>}<Btn small onClick={() => setF({ role: a })}>Role</Btn><Btn small onClick={() => setF({ status: a })}>Status</Btn><Btn small onClick={() => setF({ branches: a })}>Branches</Btn>
                   <Btn small onClick={() => void act(() => post(`/accounts/${a.id}/unlock`), 'Unlocked').then((ok) => ok && reload())}>Unlock</Btn><Btn small onClick={() => setF({ reset: a })}>Reset password</Btn><Btn small onClick={() => setF({ mfa: a })}>Reset two-step</Btn></span>
               ) },
             ]} />}</Load>
@@ -55,12 +60,13 @@ export function Staff() {
         )}
       </div>
 
+      {typeof f === 'object' && f && 'profile' in f && <StaffProfileDialog id={f.profile.id} name={f.profile.fullName} onClose={() => setF(null)} />}
       {f === 'new' && <FormDialog title="New staff account" onClose={() => setF(null)} onDone={reload} initial={{ role: 'coach', locale: LOCALE.EN, branchIds: branchId ? [branchId] : [] }} fields={[
         { name: 'fullName', label: 'Full name', type: 'text', required: true }, { name: 'email', label: 'Email', type: 'email', required: true }, { name: 'phone', label: 'Phone', type: 'tel', hint: 'Digits, with an optional leading +' },
-        { name: 'role', label: 'Role', type: 'select', required: true, options: opts(ASSIGNABLE_ROLES) }, { name: 'branchIds', label: 'Branches', type: 'checks', options: branchOpts },
+        { name: 'role', label: 'Role', type: 'select', required: true, options: roleOptions }, { name: 'branchIds', label: 'Branches', type: 'checks', options: branchOpts },
         { name: 'password', label: 'Starting password', type: 'password', required: true, hint: 'At least 12 characters. They should change it after first sign-in.' },
       ]} onSubmit={(v) => post('/accounts', { fullName: v.fullName, email: v.email, ...(v.phone ? { phone: v.phone } : {}), role: v.role, branchIds: v.branchIds, password: v.password, locale: v.locale })} />}
-      {typeof f === 'object' && f && 'role' in f && <FormDialog title={`Role: ${f.role.fullName}`} onClose={() => setF(null)} onDone={reload} initial={{ role: f.role.role }} fields={[{ name: 'role', label: 'Role', type: 'select', required: true, options: opts(ASSIGNABLE_ROLES) }, { name: 'reason', label: 'Reason', type: 'text' }]} onSubmit={(v) => post(`/accounts/${f.role.id}/role`, { role: v.role, ...(v.reason ? { reason: v.reason } : {}) })} />}
+      {typeof f === 'object' && f && 'role' in f && <FormDialog title={`Role: ${f.role.fullName}`} onClose={() => setF(null)} onDone={reload} initial={{ role: f.role.role }} fields={[{ name: 'role', label: 'Role', type: 'select', required: true, options: roleOptions, hint: 'You can give roles below your own.' }, { name: 'reason', label: 'Reason', type: 'text' }]} onSubmit={(v) => post(`/accounts/${f.role.id}/role`, { role: v.role, ...(v.reason ? { reason: v.reason } : {}) })} />}
       {typeof f === 'object' && f && 'status' in f && <FormDialog title={`Status: ${f.status.fullName}`} onClose={() => setF(null)} onDone={reload} initial={{ status: f.status.status }} fields={[{ name: 'status', label: 'Status', type: 'select', required: true, options: opts(['active', 'locked']) }, { name: 'reason', label: 'Reason', type: 'text' }]} onSubmit={(v) => post(`/accounts/${f.status.id}/status`, { status: v.status, ...(v.reason ? { reason: v.reason } : {}) })} />}
       {typeof f === 'object' && f && 'mfa' in f && (
         <Confirm title={`Reset two-step sign-in: ${f.mfa.fullName}`} danger onClose={() => setF(null)} onDone={reload}

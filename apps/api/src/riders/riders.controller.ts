@@ -3,7 +3,7 @@ import { CurrentUser, Roles } from '../auth/decorators.ts';
 import type { AuthUser } from '../auth/decorators.ts';
 import { ROLE } from '../config/constants.ts';
 import type { ApiRequest } from '../common/http.ts';
-import { DocumentsService } from './documents.service.ts';
+import { DocumentsService, WaiversService } from './documents.service.ts';
 import { RidersService } from './riders.service.ts';
 
 const STAFF = [ROLE.RECEPTION, ROLE.MANAGER, ROLE.OWNER] as const;
@@ -23,8 +23,12 @@ export class RidersController {
   @Get('mine') @Roles(ROLE.CUSTOMER)
   mine(@CurrentUser() user: AuthUser) { return this.riders.mine(user); }
 
-  @Get() @Roles(...STAFF)
+  /** A coach sees only the riders booked into their own classes: names and levels, never medical details. */
+  @Get() @Roles(ROLE.COACH, ...STAFF)
   list(@Query() query: unknown, @CurrentUser() user: AuthUser) { return this.riders.list(query, user); }
+
+  @Get(':id/history') @Roles(...FAMILY_AND_STAFF)
+  history(@Param('id') id: string, @CurrentUser() user: AuthUser) { return this.riders.history(id, user); }
 
   @Get(':id') @Roles(...FAMILY_AND_STAFF)
   get(@Param('id') id: string, @CurrentUser() user: AuthUser) { return this.riders.get(id, user); }
@@ -43,6 +47,9 @@ export class RidersController {
 
   @Post(':id/guardians') @Roles(...STAFF)
   addGuardian(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.riders.addGuardian(id, body, user); }
+
+  @Patch(':id/guardians/:accountId') @Roles(...STAFF)
+  updateGuardian(@Param('id') id: string, @Param('accountId') accountId: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.riders.updateGuardian(id, accountId, body, user); }
 
   @Delete(':id/guardians/:accountId') @Roles(...STAFF)
   removeGuardian(@Param('id') id: string, @Param('accountId') accountId: string, @CurrentUser() user: AuthUser) { return this.riders.removeGuardian(id, accountId, user); }
@@ -73,4 +80,13 @@ export class DocumentsController {
 
   @Post(':id/reject') @Roles(...STAFF)
   reject(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.docs.reject(id, body, user); }
+}
+
+@Controller('waiver-versions')
+export class WaiversController {
+  constructor(@Inject(WaiversService) private readonly waivers: WaiversService) {}
+  @Get() @Roles(...STAFF)
+  list(@Query() query: unknown, @CurrentUser() user: AuthUser) { return this.waivers.list(query, user); }
+  @Post() @Roles(ROLE.MANAGER, ROLE.OWNER)
+  publish(@Body() body: unknown, @CurrentUser() user: AuthUser) { return this.waivers.publish(body, user); }
 }

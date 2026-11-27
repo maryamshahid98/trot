@@ -21,3 +21,11 @@ export const CancelClass = z.object({
   reason: z.string().trim().min(1, 'a reason is required').max(LIMITS.reasonMax),
   cause: z.enum(CLASS_CANCEL_CAUSES).default(CANCEL_CAUSE.CLUB),
 });
+
+export const LessonRecord = z.object({
+  horseId: uuid.nullable().optional(),
+  outcome: z.string().trim().max(2000).nullable().optional(),
+  skillIds: z.array(uuid).max(100).optional(),
+  notes: z.string().trim().max(2000).nullable().optional(),
+});
+export const SetAttendance = z.object({ attendance: z.enum(['present', 'late', 'absent', 'excused']), reason: z.string().trim().min(1).max(LIMITS.reasonMax).optional() });

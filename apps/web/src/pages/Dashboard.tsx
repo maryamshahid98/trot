@@ -35,7 +35,7 @@ export function Dashboard() {
             <Stat label="Taken today" value={rev.data ? money(rev.data.netMinor, currency) : '—'} sub={rev.data ? `${rev.data.receipts} receipts` : undefined} hot />
             <Stat label="Places filled" value={util.data ? pct(util.data.utilisation) : '—'} sub={util.data ? `${util.data.filled} of ${util.data.places} places` : undefined} />
             <Stat label="Classes and rides" value={String(live.length)} sub="not cancelled" />
-            <Stat label="Owed by riders" value={unpaid.data ? money(unpaid.data.owedMinor, currency) : '—'} sub={unpaid.data ? `${unpaid.data.unpaid.length} unpaid bookings` : undefined} />
+            <Stat label="Owed by riders" value={unpaid.data ? money(unpaid.data.owedMinor, currency) : '—'} sub={unpaid.data ? `${unpaid.data.unpaid.length} let in without paying` : undefined} />
           </Row>
         )}
         <Card title="Today" flex>
@@ -45,7 +45,7 @@ export function Dashboard() {
               { head: 'Class or ride', cell: (o) => <b>{o.title}</b>, width: '1.6fr' },
               { head: 'Type', cell: (o) => label(o.format), width: '0.9fr' },
               { head: 'Where', cell: (o) => o.arenaName }, { head: 'Coach', cell: (o) => o.coachName },
-              { head: 'Places', cell: (o) => o.capacity, width: '0.6fr' }, { head: 'Status', cell: (o) => <Badge value={o.status} />, width: '0.9fr' },
+              { head: 'Free', cell: (o) => `${Math.max(0, o.capacity - o.booked)} of ${o.capacity}`, width: '0.6fr' }, { head: 'Status', cell: (o) => <Badge value={o.status} />, width: '0.9fr' },
             ]} />
           )}</Load>
         </Card>

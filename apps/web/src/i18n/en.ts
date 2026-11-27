@@ -18,8 +18,9 @@ export const en = {
     language: 'Language', loading: 'Loading…',
   },
   page: { comingSoon: 'This screen is built next.', welcome: 'Welcome', signedInAs: 'Signed in as' },
-  roles: { customer: 'Customer', coach: 'Coach', stable_hand: 'Stable hand', reception: 'Reception', manager: 'Manager', owner: 'Owner' },
+  roles: { director: 'Club director', finance: 'Finance officer', scheduler: 'Scheduler', auditor: 'Auditor', customer: 'Customer', coach: 'Coach', stable_hand: 'Stable manager', reception: 'Reception', manager: 'Manager', owner: 'Owner' },
   errors: { generic: 'Something went wrong. Please try again.', session: 'Your session ended. Please sign in again.' },
 } as const;
 
-export type Messages = typeof en;
+type Words<T> = { [K in keyof T]: T[K] extends string ? string : Words<T[K]> };
+export type Messages = Words<typeof en>;

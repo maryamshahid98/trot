@@ -4,7 +4,15 @@ import { get, login as apiLogin, loginWithCode, logout as apiLogout, restoreSess
 import type { SessionUser } from '../api/client';
 import { STAFF_ROLES, STORAGE } from '../constants';
 
-export interface Branch { id: string; name: string; timeZone: string; currency: string; active: boolean }
+export interface Branch { id: string; name: string; timeZone: string; currency: string; active: boolean; address?: string | null; opensAt?: string | null; closesAt?: string | null; holidays?: string[] }
+/** Screens are built from the base role; the account's own role is kept as "title". An auditor's screens are read-only. */
+function asScreens(u: SessionUser | null): SessionUser | null {
+  document.documentElement.classList.toggle('read-only', u?.role === 'auditor' || u?.title === 'auditor');
+  if (!u || !u.actsAs || u.actsAs === u.role) return u;
+  document.documentElement.classList.toggle('read-only', u.role === 'auditor');
+  return { ...u, title: u.role, role: u.actsAs };
+}
+
 interface AuthState {
   user: SessionUser | null; ready: boolean; branches: Branch[]; branchId: string | null;
   setBranchId: (id: string) => void; signOut: () => Promise<void>;
@@ -39,7 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setSignedOutHandler(() => { setUser(null); setBranches([]); setBranch(null); });
     (async () => {
-      const u = await restoreSession();
+      const u = asScreens(await restoreSession());
       if (u && STAFF_ROLES.includes(u.role)) { setUser(u); if (!u.mfaEnrollmentRequired) await loadBranches(u).catch(() => {}); }
       setReady(true);
     })();
@@ -48,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /** Someone is signed in. Staff only; and if the club requires two-step sign-in and it is not set up, the branches are not loaded yet (the API would refuse). */
   const enter = useCallback(async (basic: SessionUser) => {
     if (!STAFF_ROLES.includes(basic.role)) { await apiLogout(); throw new NotStaffError(); }
-    const u = await get<SessionUser>('/auth/me').catch(() => basic); // the sign-in answer does not say whether two-step sign-in is on
+    const u = asScreens(await get<SessionUser>('/auth/me').catch(() => basic))!; // the sign-in answer does not say whether two-step sign-in is on
     setUser(u);
     if (!u.mfaEnrollmentRequired) await loadBranches(u);
   }, [loadBranches]);
@@ -65,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [enter]);
 
   const refreshUser = useCallback(async () => {
-    const u = await get<SessionUser>('/auth/me');
+    const u = asScreens(await get<SessionUser>('/auth/me'))!;
     setUser(u);
     if (!u.mfaEnrollmentRequired) await loadBranches(u).catch(() => {});
   }, [loadBranches]);

@@ -3,10 +3,11 @@ import type pg from 'pg';
 import type { AuthUser } from '../auth/decorators.ts';
 import { hashPassword } from '../auth/password.ts';
 import { writeAudit } from '../common/audit.ts';
+import { branchFor } from '../common/branch.ts';
 import { parse } from '../common/validate.ts';
 import { ACCOUNT_STATUS, ADMIN_PROBLEM, AUDIT, ENTITY, OCCURRENCE_STATUS, PG_ERROR, ROLE, ROLE_RANK } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
-import { CreateAccount, IdParam, ListAccounts, ResetPassword, SetBranches, SetRole, SetStatus, UpdateAccount } from './accounts.schemas.ts';
+import { CreateAccount, CreateCustomer, IdParam, ListAccounts, SearchCustomers, ResetPassword, SetBranches, SetRole, SetStatus, UpdateAccount } from './accounts.schemas.ts';
 import { pgConstraint, pgErrorCode } from '../common/errors.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
@@ -37,7 +38,7 @@ export class AccountsService {
   }
   private outranks(user: AuthUser, t: Target) {
     if (t.id === user.id) throw new ForbiddenException(problem('You cannot do this to your own account.', ADMIN_PROBLEM.CANNOT_ACT_ON_SELF));
-    if (rank(t.role) >= rank(user.role)) throw new ForbiddenException(problem('You can only manage people ranked below you.', ADMIN_PROBLEM.ROLE_TOO_HIGH));
+    if (rank(t.role) >= rank(user.title ?? user.role)) throw new ForbiddenException(problem('You can only manage people ranked below you.', ADMIN_PROBLEM.ROLE_TOO_HIGH));
   }
   private notDeleted(t: Target) {
     if (t.status === ACCOUNT_STATUS.DELETED) throw new ConflictException(problem('This account has been deleted.', ADMIN_PROBLEM.ACCOUNT_DELETED));
@@ -89,9 +90,44 @@ export class AccountsService {
     return r;
   }
 
+  /** Guardians and customers of one branch, each with the riders they look after (BKG-012). */
+  async searchCustomers(query: unknown, user: AuthUser) {
+    const q = parse(SearchCustomers, query);
+    const branchId = branchFor(q.branchId, user);
+    return this.db.scoped({ branchIds: [branchId], role: user.role }, async (c) => ({
+      customers: (
+        await c.query(
+          `SELECT a.id, a.full_name AS "fullName", a.email, a.phone,
+                  coalesce((SELECT json_agg(json_build_object('id', r.id, 'fullName', r.full_name, 'level', r.level, 'status', r.status) ORDER BY r.full_name)
+                              FROM riders r WHERE r.branch_id = $1 AND (r.account_id = a.id OR EXISTS (SELECT 1 FROM guardian_riders g WHERE g.rider_id = r.id AND g.guardian_account_id = a.id))), '[]') AS riders
+             FROM accounts a JOIN account_branches ab ON ab.account_id = a.id AND ab.branch_id = $1
+            WHERE a.role = $2 AND a.status = $3 AND (a.full_name ILIKE $4 ESCAPE '\\' OR a.email ILIKE $4 ESCAPE '\\' OR a.phone ILIKE $4 ESCAPE '\\')
+            ORDER BY a.full_name, a.id LIMIT 10`,
+          [branchId, ROLE.CUSTOMER, ACCOUNT_STATUS.ACTIVE, likePattern(q.q)],
+        )
+      ).rows,
+    }));
+  }
+
+  async createCustomer(body: unknown, user: AuthUser) {
+    const b = parse(CreateCustomer, body);
+    const branchId = branchFor(b.branchId, user);
+    try {
+      return await this.db.tx(async (c) => {
+        if (b.email && (await c.query(`SELECT 1 FROM accounts WHERE lower(email) = $1`, [b.email])).rowCount) throw new ConflictException(problem('That email is already used by another account.', ADMIN_PROBLEM.EMAIL_TAKEN));
+        const id: string = (await c.query(`INSERT INTO accounts (role, full_name, email, phone) VALUES ($1,$2,$3,$4) RETURNING id`, [ROLE.CUSTOMER, b.fullName, b.email ?? null, b.phone ?? null])).rows[0].id;
+        await c.query(`INSERT INTO account_branches (account_id, branch_id) VALUES ($1,$2)`, [id, branchId]);
+        await writeAudit(c, user, branchId, AUDIT.ACCOUNT_CREATE, ENTITY.ACCOUNT, id, { role: ROLE.CUSTOMER, branchIds: [branchId] });
+        return { id };
+      });
+    } catch (e) {
+      return this.conflictFrom(e);
+    }
+  }
+
   async create(body: unknown, user: AuthUser) {
     const b = parse(CreateAccount, body);
-    if (rank(b.role) >= rank(user.role)) throw new ForbiddenException(problem('You cannot give a role as high as your own.', ADMIN_PROBLEM.ROLE_TOO_HIGH));
+    if (rank(b.role) >= rank(user.title ?? user.role)) throw new ForbiddenException(problem('You cannot give a role as high as your own.', ADMIN_PROBLEM.ROLE_TOO_HIGH));
     if (!b.branchIds.every((x) => user.branchIds.includes(x))) throw new ForbiddenException('You do not work in one of those branches.');
     const hash = await hashPassword(b.password);
     try {
@@ -116,7 +152,7 @@ export class AccountsService {
       await this.db.tx(async (c) => {
         const t = await this.target(c, id, user);
         this.notDeleted(t);
-        if (t.id !== user.id && rank(t.role) >= rank(user.role)) throw new ForbiddenException(problem('You can only manage people ranked below you.', ADMIN_PROBLEM.ROLE_TOO_HIGH));
+        if (t.id !== user.id && rank(t.role) >= rank(user.title ?? user.role)) throw new ForbiddenException(problem('You can only manage people ranked below you.', ADMIN_PROBLEM.ROLE_TOO_HIGH));
         if ('email' in b && (await c.query(`SELECT 1 FROM accounts WHERE lower(email) = $1 AND id <> $2`, [b.email, id])).rowCount) {
           throw new ConflictException(problem('That email is already used by another account.', ADMIN_PROBLEM.EMAIL_TAKEN));
         }
@@ -145,7 +181,7 @@ export class AccountsService {
       this.outranks(user, t);
       this.notDeleted(t);
       this.requireStaff(t);
-      if (rank(b.role) >= rank(user.role)) throw new ForbiddenException(problem('You cannot give a role as high as your own.', ADMIN_PROBLEM.ROLE_TOO_HIGH));
+      if (rank(b.role) >= rank(user.title ?? user.role)) throw new ForbiddenException(problem('You cannot give a role as high as your own.', ADMIN_PROBLEM.ROLE_TOO_HIGH));
       if (t.role === b.role) throw new ConflictException(problem(`They are already ${b.role}.`, ADMIN_PROBLEM.SAME_VALUE));
       if (t.role === ROLE.COACH && (await this.coachBusy(c, id))) {
         throw new ConflictException(problem('This coach still has classes ahead. Move or cancel them first.', ADMIN_PROBLEM.COACH_HAS_CLASSES));

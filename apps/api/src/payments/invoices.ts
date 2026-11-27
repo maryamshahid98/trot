@@ -8,7 +8,7 @@ import { vatOf } from './receipts.ts';
 
 /** The person the invoice is addressed to: the rider's first guardian, or the rider's own account. */
 async function payerOf(c: Tx, riderId: string): Promise<string | null> {
-  const g = (await c.query(`SELECT guardian_account_id AS id FROM guardian_riders WHERE rider_id = $1 ORDER BY guardian_account_id LIMIT 1`, [riderId])).rows[0]?.id as string | undefined;
+  const g = (await c.query(`SELECT guardian_account_id AS id FROM guardian_riders WHERE rider_id = $1 ORDER BY is_billing DESC, is_primary DESC, guardian_account_id LIMIT 1`, [riderId])).rows[0]?.id as string | undefined;
   if (g) return g;
   return ((await c.query(`SELECT account_id AS id FROM riders WHERE id = $1`, [riderId])).rows[0]?.id as string | null | undefined) ?? null;
 }

@@ -3,7 +3,8 @@ import { post } from '../api/client';
 import { useBranch } from '../lib/branch';
 import { fmtDateTime, label } from '../lib/format';
 import { qs, useQuery } from '../lib/useApi';
-import { Badge, Btn, Card, Load, PageHead, Table, useAct, useToast } from '../ui/kit';
+import { Badge, Btn, Card, Load, PageHead, Table, Tabs, useAct, useToast } from '../ui/kit';
+import { TemplatesTab } from './MessageSettings';
 
 interface Message {
   id: number; event: string; channel: string; to: string; subject: string; status: string; attempts: number;
@@ -12,7 +13,7 @@ interface Message {
 const STATUSES = ['queued', 'sending', 'sent', 'failed', 'skipped'];
 const EVENT_LABELS: Record<string, string> = {
   'booking.confirmed': 'Booking confirmed', 'booking.pending_payment': 'Place held', 'payment.received': 'Receipt', 'payment.refunded': 'Refund', 'booking.cancelled': 'Booking cancelled',
-  'class.cancelled': 'Class cancelled', 'waitlist.offered': 'Waitlist offer', 'class.reminder': 'Class reminder', 'package.low_balance': 'Package low',
+  'class.cancelled': 'Class cancelled', 'class.changed': 'Class changed', 'waitlist.offered': 'Waitlist offer', 'class.reminder': 'Class reminder', 'package.low_balance': 'Package low',
   'package.expiring': 'Package expiring', 'document.expiring': 'Document expiring', 'incident.escalated': 'Incident', 'assessment.decided': 'Assessment',
 };
 const PAGE = 25;
@@ -21,6 +22,7 @@ export function Comms() {
   const { branchId, branch } = useBranch();
   const act = useAct();
   const toast = useToast();
+  const [tab, setTab] = useState<'sent' | 'wording'>('sent');
   const [status, setStatus] = useState('');
   const [offset, setOffset] = useState(0);
   const list = useQuery<{ total: number; messages: Message[] }>(branchId ? `/notifications${qs({ branchId, status, limit: PAGE, offset })}` : null);
@@ -36,7 +38,9 @@ export function Comms() {
     <>
       <PageHead title="Messages" sub={`${branch?.name ?? ''} · who was told what`} actions={<Btn kind="primary" onClick={sendNow}>Send now</Btn>} />
       <div className="page">
-        <Card flex>
+        <Tabs tabs={[{ id: 'sent', label: 'Messages' }, { id: 'wording', label: 'Wording' }]} value={tab} onChange={setTab} />
+        {tab === 'wording' && <TemplatesTab />}
+        {tab === 'sent' && <Card flex>
           <p className="sub" style={{ marginTop: 0 }}>
             Confirmations, receipts, cancellations and waitlist offers are queued the moment they happen and sent within a minute. Reminders follow each person's choices.
             A message that fails is tried again after 2, 4, 8 and 16 minutes, then shown here as failed.
@@ -62,7 +66,7 @@ export function Comms() {
               </div>
             </>
           )}</Load>
-        </Card>
+        </Card>}
       </div>
     </>
   );

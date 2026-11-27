@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { ApiError } from '../api/client';
 import { Btn, Modal } from './kit';
 import { errorText } from '../lib/useApi';
+import { tr } from '../i18n';
 
 export type FieldDef = FieldShape & { /** Show this field only when this returns true for the answers so far. */ showIf?: (v: Values) => boolean };
 type FieldShape =
@@ -48,21 +49,21 @@ export function FormDialog({ title, fields, initial = {}, submit = 'Save', onSub
           const req = 'required' in f && f.required;
           return (
             <div className="field" key={f.name}>
-              {f.type !== 'checkbox' && <label htmlFor={id}>{f.label}{req ? ' *' : ''}</label>}
+              {f.type !== 'checkbox' && <label htmlFor={id}>{tr(f.label)}{req ? ' *' : ''}</label>}
               {f.type === 'textarea' ? (
                 <textarea id={id} rows={3} value={v[f.name] as string} onChange={(e) => set(f.name, e.target.value)} />
               ) : f.type === 'select' ? (
                 <select id={id} value={v[f.name] as string} onChange={(e) => set(f.name, e.target.value)}>
-                  <option value="">{f.blank ?? 'Choose…'}</option>
-                  {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  <option value="">{tr(f.blank ?? 'Choose…')}</option>
+                  {f.options.map((o) => <option key={o.value} value={o.value}>{tr(o.label)}</option>)}
                 </select>
               ) : f.type === 'checkbox' ? (
-                <label className="check"><input id={id} type="checkbox" checked={v[f.name] as boolean} onChange={(e) => set(f.name, e.target.checked)} />{f.label}</label>
+                <label className="check"><input id={id} type="checkbox" checked={v[f.name] as boolean} onChange={(e) => set(f.name, e.target.checked)} />{tr(f.label)}</label>
               ) : f.type === 'checks' ? (
                 <div className="checks">
                   {f.options.map((o) => {
                     const on = (v[f.name] as string[]).includes(o.value);
-                    return <label className="check" key={o.value}><input type="checkbox" checked={on} onChange={() => set(f.name, on ? (v[f.name] as string[]).filter((x) => x !== o.value) : [...(v[f.name] as string[]), o.value])} />{o.label}</label>;
+                    return <label className="check" key={o.value}><input type="checkbox" checked={on} onChange={() => set(f.name, on ? (v[f.name] as string[]).filter((x) => x !== o.value) : [...(v[f.name] as string[]), o.value])} />{tr(o.label)}</label>;
                   })}
                 </div>
               ) : (
@@ -72,7 +73,7 @@ export function FormDialog({ title, fields, initial = {}, submit = 'Save', onSub
                   min={'min' in f ? f.min : undefined} max={'max' in f ? f.max : undefined}
                   onChange={(e) => set(f.name, e.target.value)} />
               )}
-              {'hint' in f && f.hint && <span className="hint">{f.hint}</span>}
+              {'hint' in f && f.hint && <span className="hint">{tr(f.hint)}</span>}
               {err && <span className="error">{err}</span>}
             </div>
           );
@@ -81,7 +82,7 @@ export function FormDialog({ title, fields, initial = {}, submit = 'Save', onSub
         {error && <div className="error" role="alert">{error}</div>}
         <div className="form-actions">
           <Btn onClick={onClose}>Cancel</Btn>
-          <Btn kind="primary" type="submit" disabled={busy}>{busy ? 'Saving…' : submit}</Btn>
+          <Btn kind="primary" type="submit" disabled={busy}>{tr(busy ? 'Saving…' : submit)}</Btn>
         </div>
       </form>
     </Modal>

@@ -5,12 +5,14 @@ import { OWNS_RIDER, writeAudit } from '../common/audit.ts';
 import { parse } from '../common/validate.ts';
 import { AUDIT, DOC_STATUS, ENTITY, LIMITS, RIDER_PROBLEM, RIDER_STATUS, ROLE } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
-import { IdParam, RejectDocument, SubmitDocument } from './riders.schemas.ts';
+import { IdParam, PublishWaiver, RejectDocument, SubmitDocument, WaiverQuery } from './riders.schemas.ts';
+import { branchFor } from '../common/branch.ts';
 import type { Tx } from '../common/sql.ts';
 import { detectFileType, FILE_STORAGE, safeFileName, sha256 } from './file-storage.ts';
 import type { FileStorage } from './file-storage.ts';
 
-const COLS = `d.id, d.rider_id AS "riderId", d.kind, d.status, d.file_ref AS "fileRef", (d.file_key IS NOT NULL) AS "hasFile", d.file_name AS "fileName", d.file_type AS "fileType", d.file_size AS "fileSize", d.signed_at AS "signedAt", d.expires_at AS "expiresAt", d.created_at AS "createdAt"`;
+const COLS = `d.id, d.rider_id AS "riderId", d.kind, d.status, d.file_ref AS "fileRef", (d.file_key IS NOT NULL) AS "hasFile", d.file_name AS "fileName", d.file_type AS "fileType", d.file_size AS "fileSize", d.signed_at AS "signedAt", d.expires_at AS "expiresAt", d.created_at AS "createdAt",
+  (SELECT v.version FROM waiver_versions v WHERE v.id = d.waiver_version_id) AS "waiverVersion"`;
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
 
 @Injectable()
@@ -56,6 +58,10 @@ export class DocumentsService {
           [id, b.kind, DOC_STATUS.SUBMITTED, b.fileRef ?? null, new Date(signedAt).toISOString(), expiresAt === null ? null : new Date(expiresAt).toISOString()],
         )
       ).rows[0];
+      if (b.kind === 'waiver') {
+        // The waiver in force today is the one being accepted.
+        await c.query(`UPDATE rider_documents SET waiver_version_id = (SELECT id FROM waiver_versions WHERE branch_id = $2 ORDER BY published_at DESC LIMIT 1) WHERE id = $1`, [doc.id, r.branchId]);
+      }
       await writeAudit(c, user, r.branchId, AUDIT.DOCUMENT_SUBMIT, ENTITY.DOCUMENT, doc.id, { riderId: id, kind: b.kind });
       return { id: doc.id as string, status: DOC_STATUS.SUBMITTED };
     });
@@ -162,6 +168,31 @@ export class DocumentsService {
       await c.query(`UPDATE rider_documents SET status = $2 WHERE id = $1`, [d.id, DOC_STATUS.REJECTED]);
       await writeAudit(c, user, d.branchId, AUDIT.DOCUMENT_REJECT, ENTITY.DOCUMENT, d.id, { riderId: d.riderId, kind: d.kind, reason });
       return { id: d.id as string, status: DOC_STATUS.REJECTED };
+    });
+  }
+}
+
+/** The waiver wording over time (SAF-001). Versions are added, never changed. */
+@Injectable()
+export class WaiversService {
+  constructor(@Inject(DbService) private readonly db: DbService) {}
+
+  async list(query: unknown, user: AuthUser) {
+    const q = parse(WaiverQuery, query);
+    const branchId = branchFor(q.branchId, user);
+    return this.db.scoped({ branchIds: [branchId], role: user.role }, async (c) => ({
+      versions: (await c.query(`SELECT id, version, body, requires_resign AS "requiresResign", published_at AS "publishedAt" FROM waiver_versions WHERE branch_id = $1 ORDER BY published_at DESC`, [branchId])).rows,
+    }));
+  }
+
+  async publish(body: unknown, user: AuthUser) {
+    const b = parse(PublishWaiver, body);
+    const branchId = branchFor(b.branchId, user);
+    return this.db.scoped({ branchIds: [branchId], role: user.role }, async (c) => {
+      if ((await c.query(`SELECT 1 FROM waiver_versions WHERE branch_id = $1 AND version = $2`, [branchId, b.version])).rowCount) throw new ConflictException(problem('That version number is already used.', 'VERSION_TAKEN'));
+      const id: string = (await c.query(`INSERT INTO waiver_versions (branch_id, version, body, requires_resign, published_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`, [branchId, b.version, b.body, b.requiresResign, user.id])).rows[0].id;
+      await writeAudit(c, user, branchId, 'waiver.publish', ENTITY.DOCUMENT, id, { version: b.version, requiresResign: b.requiresResign });
+      return { id };
     });
   }
 }

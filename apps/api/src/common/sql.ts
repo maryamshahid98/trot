@@ -9,6 +9,11 @@ export type Tx = { query: (sql: string, params?: unknown[]) => Promise<{ rows: p
 /** SQL that turns a timestamp expression into epoch milliseconds, the unit the rules code uses. Only pass literal column expressions. */
 export const epochMs = (expr: string) => `(extract(epoch from ${expr}) * 1000)::bigint`;
 
+/** The horses of one session: those assigned to it, and any recorded as actually ridden in a lesson record. Null when there are none. */
+export const sessionHorses = (occurrenceId: string) => `(SELECT string_agg(n.name, ', ' ORDER BY n.name) FROM (
+  SELECT h.name FROM horse_assignments x JOIN horses h ON h.id = x.horse_id WHERE x.occurrence_id = ${occurrenceId}
+  UNION SELECT h.name FROM bookings k JOIN horses h ON h.id = k.actual_horse_id WHERE k.occurrence_id = ${occurrenceId} AND k.status <> 'cancelled') n)`;
+
 /** "Same day" for a branch means the day on that branch's own clock, not UTC. */
 export function dayKeyFor(timeZone: string): (ms: number) => string {
   const f = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' });

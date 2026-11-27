@@ -1,7 +1,7 @@
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ctx, makeBranch, startApp, stopApp } from './helpers.ts';
-import { balanceOf, codes, makeClass, makePackage, readyRider } from './booking-helpers.ts';
+import { api, ctx, makeBranch, startApp, stopApp } from './helpers.ts';
+import { balanceOf, codes, makeClass, makePackage, makeRider, readyRider, verifyDocs } from './booking-helpers.ts';
 import { auditActions, customer, directBooking, MIN, post, staff, statusOf } from './flow-helpers.ts';
 
 before(startApp);
@@ -74,6 +74,40 @@ describe('POST /bookings/:id/check-in', () => {
     const rec = await staff();
     assert.equal((await post(`/bookings/nope/check-in`, rec.token)).status, 400);
     assert.equal((await post(`/bookings/00000000-0000-0000-0000-00000000dead/check-in`, rec.token)).status, 404);
+  });
+
+  test('documents are checked again at check-in: an expired clearance or a waiver that must be signed again', async () => {
+    const branch = await makeBranch();
+    const rec = await staff('reception', [branch]);
+    const m = await staff('manager', [branch]);
+    const booked = async () => {
+      const riderId = await readyRider({ branchId: branch });
+      return { riderId, id: await directBooking({ occurrenceId: await makeClass({ branchId: branch, startsAt: Date.now() + 20 * MIN }), riderId, branchId: branch }) };
+    };
+
+    const expired = await booked();
+    await ctx.admin.query(`UPDATE rider_documents SET expires_at = now() - interval '1 day' WHERE rider_id = $1 AND kind = 'medical_form'`, [expired.riderId]);
+    const e = await post(`/bookings/${expired.id}/check-in`, rec.token);
+    assert.equal(e.status, 409, e.text);
+    assert.deepEqual(codes(e), ['MEDICAL_EXPIRED']);
+    assert.equal(await statusOf(expired.id), 'confirmed');
+
+    const old = await booked();
+    assert.equal((await post('/waiver-versions', m.token, { branchId: branch, version: `v${Date.now()}`, body: 'New wording', requiresResign: true })).status, 201);
+    assert.deepEqual(codes(await post(`/bookings/${old.id}/check-in`, rec.token)), ['WAIVER_MISSING']);
+    const doc = await post(`/riders/${old.riderId}/documents`, rec.token, { kind: 'waiver' });
+    assert.equal((await post(`/documents/${doc.body.id}/verify`, rec.token)).status, 201);
+    assert.equal((await post(`/bookings/${old.id}/check-in`, rec.token)).status, 201);
+  });
+
+  test('a branch that does not require a document does not ask for it at check-in', async () => {
+    const branch = await makeBranch();
+    const m = await staff('manager', [branch]);
+    assert.equal((await api('PATCH', `/branches/${branch}/policy`, { token: m.token, body: { requireMedicalForm: false } })).status, 200);
+    const riderId = await makeRider({ branchId: branch });
+    await verifyDocs(riderId, { medical: false });
+    const id = await directBooking({ occurrenceId: await makeClass({ branchId: branch, startsAt: Date.now() + 20 * MIN }), riderId, branchId: branch });
+    assert.equal((await post(`/bookings/${id}/check-in`, m.token)).status, 201);
   });
 
   test('two desks checking in at once: one succeeds', async () => {

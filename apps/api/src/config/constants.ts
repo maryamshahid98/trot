@@ -9,6 +9,10 @@ export const ROLE = {
   RECEPTION: 'reception',
   MANAGER: 'manager',
   OWNER: 'owner',
+  DIRECTOR: 'director',
+  FINANCE: 'finance',
+  SCHEDULER: 'scheduler',
+  AUDITOR: 'auditor',
 } as const;
 export type Role = (typeof ROLE)[keyof typeof ROLE];
 export const ROLES = Object.values(ROLE);
@@ -43,6 +47,7 @@ export const PG_ERROR = {
   INSUFFICIENT_PRIVILEGE: '42501',
   UNIQUE_VIOLATION: '23505',
   CHECK_VIOLATION: '23514', // the ledger raises this when a balance would go below zero
+  DEADLOCK_DETECTED: '40P01',
 } as const;
 
 /** Audit log vocabulary. */
@@ -76,6 +81,7 @@ export const AUDIT = {
   BOOKING_CANCEL: 'booking.cancel',
   RIDER_CREATE: 'rider.create',
   RIDER_UPDATE: 'rider.update',
+  RIDER_MEDICAL_VIEW: 'rider.medical_view',
   RIDER_LEVEL: 'rider.level',
   RIDER_STATUS: 'rider.status',
   GUARDIAN_ADD: 'guardian.add',
@@ -255,7 +261,7 @@ export const CANCEL_CAUSES = ['customer', 'club', 'weather'] as const;
 export const CANCEL_CAUSE = { CUSTOMER: 'customer', CLUB: 'club', WEATHER: 'weather' } as const;
 /** Why a whole class can be cancelled. A class is never cancelled "by the customer". */
 export const CLASS_CANCEL_CAUSES = [CANCEL_CAUSE.CLUB, CANCEL_CAUSE.WEATHER] as const;
-export const BOOKING_SOURCE = { CUSTOMER_APP: 'customer_app', STAFF_PORTAL: 'staff_portal' } as const;
+export const BOOKING_SOURCE = { CUSTOMER_APP: 'customer_app', STAFF_PORTAL: 'staff_portal', WALK_IN: 'walk_in' } as const;
 /** Only a document a staff member has verified counts. A submitted but unchecked form does not. */
 export const DOC_KIND = { MEDICAL_FORM: 'medical_form', WAIVER: 'waiver', PHOTO_PERMISSION: 'photo_permission', ID_DOCUMENT: 'id_document' } as const;
 export const DOC_KINDS = Object.values(DOC_KIND);
@@ -314,6 +320,8 @@ export const FLOW_PROBLEM = {
 
 // ---------- money ----------
 export const PAYMENT_METHODS = ['cash', 'card_at_desk', 'bank_transfer'] as const;
+/** What the office may take today (PAY-001). Bank transfer stays in the list above only so older receipts can still be read. */
+export const OFFICE_METHODS = ['cash', 'card_at_desk'] as const;
 export const ADJUSTMENT_KINDS = ['refund', 'credit', 'write_off', 'correction'] as const;
 export const ADJUSTMENT_KIND = { REFUND: 'refund', CREDIT: 'credit', WRITE_OFF: 'write_off', CORRECTION: 'correction' } as const;
 /** Prices are shown VAT-inclusive; this is the share of a price that is VAT. Saudi standard rate. Confirm with the club's accountant. */
@@ -361,9 +369,9 @@ export const HORSE_PROBLEM = {
 
 // ---------- people, branches, arenas, leave ----------
 /** How much authority a role has. Nobody may act on someone of equal or higher rank, or give a role as high as their own. */
-export const ROLE_RANK = { customer: 0, coach: 1, stable_hand: 1, reception: 1, manager: 2, owner: 3 } as const;
+export const ROLE_RANK = { customer: 0, coach: 1, stable_hand: 1, reception: 1, finance: 1, scheduler: 1, auditor: 1, manager: 2, director: 2.5, owner: 3 } as const;
 /** Roles that can be given through the API. Owners are set up outside it. */
-export const ASSIGNABLE_ROLES = [ROLE.COACH, ROLE.STABLE_HAND, ROLE.RECEPTION, ROLE.MANAGER] as const;
+export const ASSIGNABLE_ROLES = [ROLE.COACH, ROLE.STABLE_HAND, ROLE.RECEPTION, ROLE.MANAGER, ROLE.SCHEDULER, ROLE.FINANCE, ROLE.AUDITOR, ROLE.DIRECTOR] as const;
 export const LOCALES = ['en', 'ar'] as const;
 export const ADMIN_PROBLEM = {
   ACCOUNT_NOT_FOUND: 'ACCOUNT_NOT_FOUND',

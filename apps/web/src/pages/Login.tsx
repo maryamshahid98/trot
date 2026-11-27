@@ -4,7 +4,9 @@ import { Navigate } from 'react-router-dom';
 import { ApiError } from '../api/client';
 import { NotStaffError, useAuth } from '../auth/AuthContext';
 import { PATH, SIGNIN_PHOTO } from '../constants';
-import { t } from '../i18n';
+import { t, tr } from '../i18n';
+import { LanguageButton } from '../ui/LanguageButton';
+import { ForgotPassword } from './ForgotPassword';
 import { Logo } from '../ui/Logo';
 
 const TOO_MANY = 429;
@@ -20,6 +22,8 @@ export function Login() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [hasPhoto, setHasPhoto] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     const img = new Image();
     img.onload = () => setHasPhoto(true);
@@ -60,6 +64,8 @@ export function Login() {
     }
   }
 
+  if (forgot) return <ForgotPassword identifier={identifier} onBack={(message) => { setForgot(false); setNotice(message ?? null); setPassword(''); setError(null); }} />;
+
   if (mfaToken) {
     return (
       <main className={`login${hasPhoto ? ' has-photo' : ''}`}>
@@ -96,7 +102,10 @@ export function Login() {
           <input id="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </div>
         {error && <div className="error" role="alert">{error}</div>}
+        {notice && <div className="note" role="status">{notice}</div>}
         <button className="btn" type="submit" disabled={busy || !identifier || !password}>{busy ? t.login.working : t.login.submit}</button>
+        <button type="button" className="btn2 small" onClick={() => { setForgot(true); setNotice(null); }}>{tr('Forgot password')}</button>
+        <LanguageButton />
       </form>
     </main>
   );

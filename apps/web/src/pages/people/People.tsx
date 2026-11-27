@@ -1,6 +1,8 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { post } from '../../api/client';
+import { ApiError, post } from '../../api/client';
+import { contactFrom } from './contact';
+import { aboutForCreate, RIDER_ABOUT_FIELDS } from './riderFields';
 import { RIDER_FILTER_STATUSES } from '../../constants';
 import { useBranch } from '../../lib/branch';
 import { label } from '../../lib/format';
@@ -23,6 +25,8 @@ export function People() {
   if (seenUrlQ !== urlQ) { setSeenUrlQ(urlQ); setQ(urlQ); setOffset(0); }
   const [open, setOpen] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  // Set when the server says this name and birth date exist: saving again then means "this is a different person".
+  const duplicate = useRef('');
   const list = useQuery<{ total: number; riders: Rider[] }>(branchId ? `/riders${qs({ branchId, q: q.trim(), status, limit: PAGE, offset })}` : null);
   return (
     <>
@@ -55,16 +59,27 @@ export function People() {
         <FormDialog title="New rider" submit="Create rider" onClose={() => setAdding(false)} onDone={() => { setAdding(false); list.reload(); }}
           initial={{ isWalkIn: true }}
           fields={[
-            { name: 'fullName', label: 'Full name', type: 'text', required: true }, { name: 'dateOfBirth', label: 'Date of birth', type: 'date', required: true, hint: 'Riders under 18 need a guardian account linked afterwards.' },
+            { name: 'fullName', label: 'Full name', type: 'text', required: true }, { name: 'dateOfBirth', label: 'Date of birth', type: 'date', required: true, hint: 'Riders under 18 also need a guardian and an emergency contact before they can be booked.' },
             { name: 'ecName', label: 'Emergency contact name', type: 'text' }, { name: 'ecPhone', label: 'Emergency contact phone', type: 'tel' },
             { name: 'medicalNotes', label: 'Medical notes', type: 'textarea' }, { name: 'allergies', label: 'Allergies', type: 'textarea' },
-            { name: 'isWalkIn', label: 'Walk-in rider (no app account)', type: 'checkbox' },
+            { name: 'isWalkIn', label: 'Walk-in rider (no app account)', type: 'checkbox', hint: 'An adult walk-in needs a phone number, an email or an emergency contact.' },
+            ...RIDER_ABOUT_FIELDS,
           ]}
-          onSubmit={(v) => post('/riders', {
-            branchId, fullName: v.fullName, dateOfBirth: v.dateOfBirth, isWalkIn: v.isWalkIn === true,
-            ...(v.ecName && v.ecPhone ? { emergencyContact: { name: v.ecName, phone: v.ecPhone } } : {}),
-            ...(v.medicalNotes ? { medicalNotes: v.medicalNotes } : {}), ...(v.allergies ? { allergies: v.allergies } : {}),
-          })} />
+          onSubmit={async (v) => {
+            const contact = contactFrom(v.ecName, v.ecPhone);
+            const who = `${String(v.fullName).trim().toLowerCase()}|${String(v.dateOfBirth)}`;
+            try {
+              const made = await post<{ id: string }>('/riders', {
+                branchId, fullName: v.fullName, dateOfBirth: v.dateOfBirth, isWalkIn: v.isWalkIn === true, confirmDuplicate: duplicate.current === who,
+                ...aboutForCreate(v), ...(contact ? { emergencyContact: contact } : {}), ...(v.medicalNotes ? { medicalNotes: v.medicalNotes } : {}), ...(v.allergies ? { allergies: v.allergies } : {}),
+              });
+              duplicate.current = '';
+              setOpen(made.id); // straight to the new rider: guardians and documents come next
+            } catch (e) {
+              if (e instanceof ApiError && e.status === 409) { duplicate.current = who; throw new Error(`${e.message} Press "Create rider" again to save a second profile.`, { cause: e }); }
+              throw e;
+            }
+          }} />
       )}
     </>
   );

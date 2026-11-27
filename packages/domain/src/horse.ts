@@ -11,6 +11,8 @@ export interface HorseCheckInput {
   occurrence: Occurrence;
   /** Levels of the riders who will ride this horse in the class. */
   riderLevels: Level[];
+  /** The riders themselves, for the horse's weight and age limits. */
+  riders?: readonly { weightKg?: number; ageYears?: number }[];
   /** Every other assignment of this horse (any day). */
   assignments: readonly HorseAssignment[];
   policy: Policy;
@@ -29,6 +31,17 @@ export function checkHorse(i: HorseCheckInput): { allowed: boolean; reasons: Rea
   if (!horse.suitableArenaIds.includes(occ.arenaId)) add("ARENA_UNSUITABLE", "This horse is not approved for this arena.");
   if (i.riderLevels.some((l) => !horse.suitableLevels.includes(l))) add("LEVEL_UNSUITABLE", "This horse is not suitable for every rider's level.");
 
+  if (horse.formats?.length && !horse.formats.includes(occ.format)) add("HORSE_NOT_FOR_THIS_WORK", "This horse is not used for this kind of class or ride.");
+  const riders = i.riders ?? [];
+  const maxKg = horse.maxRiderWeightKg;
+  if (maxKg !== undefined) {
+    // An unknown weight cannot be assumed to be safe.
+    if (riders.some((r) => r.weightKg === undefined)) add("RIDER_WEIGHT_UNKNOWN", `Record every rider's weight: this horse carries at most ${maxKg} kg.`);
+    if (riders.some((r) => r.weightKg !== undefined && r.weightKg > maxKg)) add("RIDER_TOO_HEAVY", `This horse carries at most ${maxKg} kg.`);
+  }
+  const minAge = horse.minRiderAge;
+  if (minAge !== undefined && riders.some((r) => r.ageYears !== undefined && r.ageYears < minAge)) add("RIDER_TOO_YOUNG_FOR_HORSE", `Riders of this horse must be at least ${minAge}.`);
+
   const others = i.assignments.filter((a) => a.occurrenceId !== occ.id);
   if (others.some((a) => a.startsAt < occ.endsAt && occ.startsAt < a.endsAt)) add("HORSE_OVERLAP", "The horse is already working at this time.");
 
@@ -37,9 +50,11 @@ export function checkHorse(i: HorseCheckInput): { allowed: boolean; reasons: Rea
   if (tooClose) add("HORSE_REST_GAP", `The horse needs ${policy.horseMinRestBetweenMinutes} minutes of rest between sessions.`);
 
   const day = others.filter((a) => dayKeyOf(a.startsAt) === dayKeyOf(occ.startsAt)).length;
-  if (day + 1 > policy.horseMaxSessionsPerDay) add("HORSE_DAILY_LIMIT", `Limit of ${policy.horseMaxSessionsPerDay} sessions a day reached.`);
+  const perDay = horse.maxSessionsPerDay ?? policy.horseMaxSessionsPerDay;
+  if (day + 1 > perDay) add("HORSE_DAILY_LIMIT", `Limit of ${perDay} sessions a day reached.`);
   const week = others.filter((a) => weekKeyOf(a.startsAt) === weekKeyOf(occ.startsAt)).length;
-  if (week + 1 > policy.horseMaxSessionsPerWeek) add("HORSE_WEEKLY_LIMIT", `Limit of ${policy.horseMaxSessionsPerWeek} sessions a week reached.`);
+  const perWeek = horse.maxSessionsPerWeek ?? policy.horseMaxSessionsPerWeek;
+  if (week + 1 > perWeek) add("HORSE_WEEKLY_LIMIT", `Limit of ${perWeek} sessions a week reached.`);
 
   return { allowed: reasons.length === 0, reasons };
 }

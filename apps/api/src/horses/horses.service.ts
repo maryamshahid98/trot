@@ -8,12 +8,16 @@ import { parse } from '../common/validate.ts';
 import { AUDIT, ENTITY, HORSE_PROBLEM, HORSE_STATUS, LIMITS, OCCURRENCE_STATUS, PG_ERROR, ROLE } from '../config/constants.ts';
 import { DbService } from '../db/db.service.ts';
 import type { Tx } from '../bookings/core.ts';
-import { CreateHorse, IdParam, ListHorses, SetHorseStatus, UpdateHorse, WorkloadQuery } from './horses.schemas.ts';
+import { AddCare, CreateHorse, IdParam, ListHorses, SetHorseStatus, UpdateHorse, WorkloadQuery } from './horses.schemas.ts';
 import { pgErrorCode } from '../common/errors.ts';
 
 const problem = (message: string, code: string) => ({ message, problems: [{ code, message }] });
 const likePattern = (q: string) => `%${q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
-const HORSE_COLS = `h.id, h.name, h.status, h.suitable_levels::text[] AS "suitableLevels", h.notes,
+/** Request field -> column for the profile details. Only these names ever reach the SQL. */
+const PROFILE: Record<string, string> = { owner: 'owner', stable: 'stable', stall: 'stall', maxRiderWeightKg: 'max_rider_weight_kg', minRiderAge: 'min_rider_age', maxSessionsPerDay: 'max_sessions_per_day', maxSessionsPerWeek: 'max_sessions_per_week', formats: 'formats' };
+const HORSE_COLS = `h.id, h.name, h.status, h.suitable_levels::text[] AS "suitableLevels", h.notes, h.owner, h.stable, h.stall,
+  h.max_rider_weight_kg AS "maxRiderWeightKg", h.min_rider_age AS "minRiderAge", h.max_sessions_per_day AS "maxSessionsPerDay", h.max_sessions_per_week AS "maxSessionsPerWeek", h.formats::text[] AS formats,
+  (SELECT to_char(min(due_on), 'YYYY-MM-DD') FROM (SELECT DISTINCT ON (kind) kind, due_on FROM horse_care_events e WHERE e.horse_id = h.id ORDER BY kind, happened_on DESC, recorded_at DESC) x) AS "nextCareDue",
   coalesce(array(SELECT ha.arena_id FROM horse_arenas ha WHERE ha.horse_id = h.id ORDER BY ha.arena_id), '{}') AS "arenaIds"`;
 const iso = (ms: number) => new Date(ms).toISOString();
 
@@ -50,6 +54,41 @@ export class HorsesService {
     });
   }
 
+  private async saveProfile(c: Tx, id: string, b: Record<string, unknown>, userId: string) {
+    const keys = Object.keys(PROFILE).filter((k) => b[k] !== undefined);
+    if (!keys.length) return;
+    const before = (await c.query(`SELECT stable, stall FROM horses WHERE id = $1`, [id])).rows[0];
+    await c.query(`UPDATE horses SET ${keys.map((k, i) => `${PROFILE[k]} = $${i + 2}${k === 'formats' ? '::class_format[]' : ''}`).join(', ')} WHERE id = $1`, [id, ...keys.map((k) => b[k])]);
+    const after = (await c.query(`SELECT stable, stall FROM horses WHERE id = $1`, [id])).rows[0];
+    // Every change of stable or stall is kept (HOR-001, movement history).
+    if (before.stable !== after.stable || before.stall !== after.stall) await c.query(`INSERT INTO horse_moves (horse_id, stable, stall, moved_by) VALUES ($1,$2,$3,$4)`, [id, after.stable, after.stall, userId]);
+  }
+
+  /** Care given, what is next due, and where the horse has been (HOR-005, HOR-006). */
+  async record(rawId: string, user: AuthUser) {
+    const { id } = parse(IdParam, { id: rawId });
+    return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+      if (!(await c.query(`SELECT 1 FROM horses WHERE id = $1`, [id])).rowCount) throw new NotFoundException(problem('Horse not found.', HORSE_PROBLEM.HORSE_NOT_FOUND));
+      const care = (await c.query(`SELECT e.id, e.kind, to_char(e.happened_on, 'YYYY-MM-DD') AS "happenedOn", to_char(e.due_on, 'YYYY-MM-DD') AS "dueOn", e.notes, a.full_name AS "recordedBy" FROM horse_care_events e LEFT JOIN accounts a ON a.id = e.recorded_by WHERE e.horse_id = $1 ORDER BY e.happened_on DESC, e.recorded_at DESC LIMIT 200`, [id])).rows;
+      const moves = (await c.query(`SELECT m.id, m.stable, m.stall, m.moved_at AS "movedAt", a.full_name AS "movedBy" FROM horse_moves m LEFT JOIN accounts a ON a.id = m.moved_by WHERE m.horse_id = $1 ORDER BY m.moved_at DESC LIMIT 100`, [id])).rows;
+      const statuses = (await c.query(`SELECT l.id::text AS id, l.at, l.detail, a.full_name AS "actorName" FROM audit_log l LEFT JOIN accounts a ON a.id = l.actor_account_id WHERE l.entity = $2 AND l.entity_id = $1 AND l.action = $3 ORDER BY l.id DESC LIMIT 100`, [id, ENTITY.HORSE, AUDIT.HORSE_STATUS])).rows;
+      return { care, moves, statuses };
+    });
+  }
+
+  async addCare(rawId: string, body: unknown, user: AuthUser) {
+    const { id } = parse(IdParam, { id: rawId });
+    const b = parse(AddCare, body);
+    if (b.dueOn && b.dueOn < b.happenedOn) throw new BadRequestException({ message: 'The request is not valid.', problems: [{ field: 'dueOn', message: 'must not be before the day it happened' }] });
+    return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+      const h = (await c.query(`SELECT branch_id AS "branchId" FROM horses WHERE id = $1`, [id])).rows[0];
+      if (!h) throw new NotFoundException(problem('Horse not found.', HORSE_PROBLEM.HORSE_NOT_FOUND));
+      const made: string = (await c.query(`INSERT INTO horse_care_events (horse_id, kind, happened_on, due_on, notes, recorded_by) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [id, b.kind, b.happenedOn, b.dueOn ?? null, b.notes ?? null, user.id])).rows[0].id;
+      await writeAudit(c, user, h.branchId, 'horse.care', ENTITY.HORSE, id, { kind: b.kind, happenedOn: b.happenedOn, dueOn: b.dueOn ?? null });
+      return { id: made };
+    });
+  }
+
   async create(body: unknown, user: AuthUser) {
     const b = parse(CreateHorse, body);
     const branchId = branchFor(b.branchId, user);
@@ -58,6 +97,7 @@ export class HorsesService {
         await this.arenasInBranch(c, branchId, b.arenaIds);
         const id: string = (await c.query(`INSERT INTO horses (branch_id, name, suitable_levels, notes) VALUES ($1,$2,$3::level[],$4) RETURNING id`, [branchId, b.name, b.suitableLevels, b.notes ?? null])).rows[0].id;
         for (const a of b.arenaIds) await c.query(`INSERT INTO horse_arenas (horse_id, arena_id) VALUES ($1,$2)`, [id, a]);
+        await this.saveProfile(c, id, b, user.id);
         await writeAudit(c, user, branchId, AUDIT.HORSE_CREATE, ENTITY.HORSE, id, { name: b.name });
         return { id };
       });
@@ -84,6 +124,7 @@ export class HorsesService {
           sets.push(`${col[key]}${params.length}${key === 'suitableLevels' ? '::level[]' : ''}`);
         }
         if (sets.length) await c.query(`UPDATE horses SET ${sets.join(', ')} WHERE id = $1`, params);
+        await this.saveProfile(c, id, b, user.id);
         const arenaIds = b.arenaIds;
         if (arenaIds !== undefined) {
           await this.arenasInBranch(c, h.branchId, arenaIds);

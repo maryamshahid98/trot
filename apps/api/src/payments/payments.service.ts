@@ -16,7 +16,7 @@ import type { Row, Tx } from '../common/sql.ts';
 
 const problem = (message: string, code: string, extra: object = {}) => ({ message, problems: [{ code, message }], ...extra });
 const RECEIPT_COLS = `r.id, r.number, r.amount_minor AS "amountMinor", r.vat_minor AS "vatMinor", r.method, r.issued_at AS "issuedAt",
-  r.rider_id AS "riderId", rd.full_name AS "riderName", r.for_booking_id AS "forBookingId", r.for_rider_package_id AS "forPackageId", r.issued_by AS "issuedBy"`;
+  r.rider_id AS "riderId", rd.full_name AS "riderName", r.for_booking_id AS "forBookingId", r.for_rider_package_id AS "forPackageId", r.issued_by AS "issuedBy", r.terminal_ref AS "terminalRef"`;
 
 @Injectable()
 export class PaymentsService {
@@ -51,13 +51,18 @@ export class PaymentsService {
     const b = parse(RecordPayment, body);
     return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
       const { b: booking, occ } = await this.lockBooking(c, id);
-      const bad = this.mustBePending(booking, Date.now());
+      // A rider let in before paying (confirm unpaid) still has an open invoice, and can pay it at any time afterwards.
+      const owes =
+        booking.status !== BOOKING_STATUS.PENDING_OFFICE_PAYMENT && booking.status !== BOOKING_STATUS.CANCELLED &&
+        ((await c.query(`SELECT 1 FROM invoices i WHERE i.booking_id = $1 AND i.status = 'issued' AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.for_booking_id = $1)`, [id])).rowCount ?? 0) > 0;
+      const bad = owes ? null : this.mustBePending(booking, Date.now());
       if (bad) throw new ConflictException(bad);
       const price = occ.priceMinor as number;
-      if (b.amountMinor !== price) throw new UnprocessableEntityException(problem(`The class costs ${price} halalas.`, PAYMENT_PROBLEM.AMOUNT_MISMATCH));
+      if (b.amountMinor !== price) throw new UnprocessableEntityException(problem(`The price is ${(price / 100).toFixed(2)}. Enter that amount.`, PAYMENT_PROBLEM.AMOUNT_MISMATCH));
       // A free class has nothing to receipt.
-      const receipt = price > 0 ? await issueReceipt(c, { branchId: booking.branchId, riderId: booking.riderId, amountMinor: price, method: b.method, bookingId: id, userId: user.id }) : null;
-      await c.query(`UPDATE bookings SET status = $2, hold_expires_at = NULL WHERE id = $1`, [id, BOOKING_STATUS.CONFIRMED]);
+      const receipt = price > 0 ? await issueReceipt(c, { branchId: booking.branchId, riderId: booking.riderId, amountMinor: price, method: b.method, terminalRef: b.terminalRef, bookingId: id, userId: user.id }) : null;
+      const status = owes ? (booking.status as string) : BOOKING_STATUS.CONFIRMED;
+      await c.query(`UPDATE bookings SET status = $2, hold_expires_at = NULL WHERE id = $1`, [id, status]);
       if (receipt) {
         const invoice = await ensureBookingInvoice(c, id, user.id);
         if (invoice) await markInvoicePaid(c, invoice.id, receipt.id);
@@ -67,7 +72,7 @@ export class PaymentsService {
         dedupeKey: `booking:${id}:paid`, data: { receiptNumber: receipt?.number ?? null, amountMinor: price },
       });
       await writeAudit(c, user, booking.branchId, AUDIT.PAYMENT_RECORD, ENTITY.BOOKING, id, { amountMinor: price, method: b.method, receipt: receipt?.number ?? null });
-      return { id, status: BOOKING_STATUS.CONFIRMED, receipt };
+      return { id, status, receipt };
     });
   }
 
@@ -123,8 +128,27 @@ export class PaymentsService {
       const adjustments =
         user.role === ROLE.CUSTOMER
           ? []
-          : (await c.query(`SELECT id, kind, amount_minor AS "amountMinor", reason, requested_by AS "requestedBy", approved_by AS "approvedBy", created_at AS "createdAt" FROM financial_adjustments WHERE receipt_id = $1 ORDER BY created_at`, [id])).rows;
-      return { ...r, adjustments };
+          : (await c.query(`SELECT f.id, f.kind, f.amount_minor AS "amountMinor", f.reason, f.requested_by AS "requestedBy", coalesce(f.approved_by, a.approved_by) AS "approvedBy", f.created_at AS "createdAt"
+                              FROM financial_adjustments f LEFT JOIN adjustment_approvals a ON a.adjustment_id = f.id WHERE f.receipt_id = $1 ORDER BY f.created_at`, [id])).rows;
+      // Who took the money, for the printed receipt.
+      const seller = (
+        await c.query(`SELECT coalesce(o.legal_name, o.name) AS name, o.tax_number AS "taxNumber", coalesce(b.address, o.address) AS address, o.phone, o.email, b.name AS "branchName"
+                          FROM receipts x JOIN branches b ON b.id = x.branch_id JOIN organisations o ON o.id = b.organisation_id WHERE x.id = $1`, [id])
+      ).rows[0];
+      return { ...r, adjustments, seller };
+    });
+  }
+
+  /** A manager signs off a refund or correction recorded at the desk. The adjustment itself is not edited. */
+  async approve(rawId: string, user: AuthUser) {
+    const { id } = parse(IdParam, { id: rawId });
+    return this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+      const a = (await c.query(`SELECT f.branch_id AS "branchId", coalesce(f.approved_by, x.approved_by) AS "approvedBy" FROM financial_adjustments f LEFT JOIN adjustment_approvals x ON x.adjustment_id = f.id WHERE f.id = $1`, [id])).rows[0];
+      if (!a) throw new NotFoundException('Adjustment not found.');
+      if (a.approvedBy) throw new ConflictException(problem('This has already been approved.', 'ALREADY_APPROVED'));
+      await c.query(`INSERT INTO adjustment_approvals (adjustment_id, approved_by) VALUES ($1,$2)`, [id, user.id]);
+      await writeAudit(c, user, a.branchId, 'adjustment.approve', ENTITY.ADJUSTMENT, id, {});
+      return { id, approved: true };
     });
   }
 
@@ -147,7 +171,7 @@ export class PaymentsService {
         // The receipt row is locked above, so two refunds on it are decided one after the other and the total can never exceed what was paid.
         const done = (await c.query(`SELECT coalesce(sum(amount_minor),0)::int AS n FROM financial_adjustments WHERE receipt_id = $1 AND kind = $2`, [id, ADJUSTMENT_KIND.REFUND])).rows[0].n as number;
         if (done + b.amountMinor > r.amountMinor) {
-          throw new UnprocessableEntityException(problem(`Only ${r.amountMinor - done} halalas can still be refunded on this receipt.`, PAYMENT_PROBLEM.OVER_REFUND));
+          throw new UnprocessableEntityException(problem(`Only ${((r.amountMinor - done) / 100).toFixed(2)} can still be refunded on this receipt.`, PAYMENT_PROBLEM.OVER_REFUND));
         }
       }
       const adj = (

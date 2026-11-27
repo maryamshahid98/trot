@@ -18,6 +18,18 @@ export class NotificationsController {
   @Post('dispatch') @HttpCode(200) @Roles(...MANAGERS)
   dispatch(@CurrentUser() u: AuthUser) { return this.svc.dispatchFor(u); }
 
+  @Get('templates') @Roles(...MANAGERS)
+  templates(@CurrentUser() u: AuthUser, @Query('branchId') branchId?: string) { return this.svc.templates(u, branchId); }
+
+  @Put('templates') @Roles(...MANAGERS)
+  setTemplate(@Body() b: unknown, @CurrentUser() u: AuthUser) { return this.svc.setTemplate(b, u); }
+
+  @Get('customers/:id/preferences') @Roles(ROLE.RECEPTION, ...MANAGERS)
+  customer(@Param('id') id: string, @CurrentUser() u: AuthUser) { return this.svc.customerPreferences(id, u); }
+
+  @Put('customers/:id/preferences') @Roles(ROLE.RECEPTION, ...MANAGERS)
+  setCustomer(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.svc.customerPreferences(id, u, b ?? {}); }
+
   /** My own choices for reminders. Any signed-in person. */
   @Get('preferences')
   preferences(@CurrentUser() u: AuthUser) { return this.svc.getPreferences(u); }

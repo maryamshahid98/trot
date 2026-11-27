@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ACCOUNT_STATUS, ASSIGNABLE_ROLES, LIMITS, LOCALES, ROLES, SETTABLE_ACCOUNT_STATUSES } from '../config/constants.ts';
+import { ACCOUNT_STATUS, ASSIGNABLE_ROLES, FORMATS, LEVELS, LIMITS, LOCALES, ROLES, SETTABLE_ACCOUNT_STATUSES } from '../config/constants.ts';
 import { uuid } from '../schedule/schedule.schemas.ts';
 
 const name = z.string().trim().min(1).max(LIMITS.nameMax);
@@ -33,3 +33,21 @@ export const SetBranches = z.object({ branchIds });
 
 /** A short list of working staff for pickers (who can teach, who can lead a ride). */
 export const ListStaff = z.object({ branchId: uuid.optional(), role: z.enum(ASSIGNABLE_ROLES).optional() });
+
+/** A parent or customer added at the desk. They have no password until they use the app. */
+export const CreateCustomer = z
+  .object({ branchId: uuid.optional(), fullName: name, email: email.optional(), phone: phone.optional() })
+  .refine((v) => v.email || v.phone, { message: 'give a phone number or an email', path: ['phone'] });
+export const SearchCustomers = z.object({ branchId: uuid.optional(), q: z.string().trim().min(2).max(LIMITS.searchMax) });
+
+const clock = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'must be a time such as 08:00').nullable();
+export const StaffProfile = z.object({
+  qualifications: z.string().trim().max(LIMITS.notesMax).nullable().default(null),
+  levels: z.array(z.enum(LEVELS)).min(1, 'choose at least one level'),
+  formats: z.array(z.enum(FORMATS)).default([]),
+  certificationExpires: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be a date such as 2026-12-01').nullable().default(null),
+  workDays: z.array(z.number().int().min(0).max(6)).default([]),
+  workFrom: clock.default(null),
+  workTo: clock.default(null),
+  maxSessionsPerDay: z.number().int().min(1).max(20).nullable().default(null),
+}).refine((v) => !v.workFrom === !v.workTo && (!v.workFrom || v.workFrom < (v.workTo as string)), { message: 'give both a start and a later end, or neither', path: ['workTo'] });

@@ -1,6 +1,7 @@
 import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { parse } from '../common/validate.ts';
-import { ChangePasswordBody, LoginBody, RefreshBody } from './auth.schemas.ts';
+import { ChangePasswordBody, ForgotBody, LoginBody, RefreshBody, ResetBody } from './auth.schemas.ts';
+import { ResetService } from './reset.service.ts';
 import { MfaService } from './mfa.service.ts';
 import { AuthService } from './auth.service.ts';
 import { AllowWithoutMfa, CurrentUser, Public } from './decorators.ts';
@@ -18,6 +19,7 @@ export class AuthController {
     @Inject(AuthService) private readonly auth: AuthService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(MfaService) private readonly mfa: MfaService,
+    @Inject(ResetService) private readonly resets: ResetService,
   ) {}
 
   /** The website gets its refresh token as a cookie only; everyone else gets it in the body. */
@@ -65,6 +67,13 @@ export class AuthController {
     return token ? this.auth.logout(token) : { ok: true };
   }
 
+  /** Sends a one-time code for choosing a new password. */
+  @Post('forgot') @HttpCode(200) @Public() @UseGuards(RateLimitGuard)
+  forgot(@Body() body: unknown) { return this.resets.forgot(parse(ForgotBody, body).identifier); }
+
+  @Post('reset') @HttpCode(200) @Public() @UseGuards(RateLimitGuard)
+  reset(@Body() body: unknown) { const b = parse(ResetBody, body); return this.resets.reset(b.identifier, b.code, b.newPassword); }
+
   /** The second step of a two-step sign-in: the token from login plus a code from the authenticator app, or a recovery code. */
   @Post('mfa/verify')
   @HttpCode(200)
@@ -93,7 +102,9 @@ export class AuthController {
 
   @Get('me') @AllowWithoutMfa()
   me(@CurrentUser() user: AuthUser) {
-    return user;
+    // "role" is the account's own role; "actsAs" is the base role the portal builds its screens from.
+    const { title, source: _source, ...rest } = user;
+    return { ...rest, role: title ?? user.role, actsAs: user.role === 'manager' && title === 'auditor' ? 'manager' : title === 'director' ? 'manager' : title === 'finance' || title === 'scheduler' ? 'reception' : user.role };
   }
 
   @Post('change-password')

@@ -148,7 +148,7 @@ describe('moving an incident along', () => {
   test('only an owner can close a critical incident', async () => {
     const manager = await staff('manager');
     const owner = await staff('owner');
-    const id = (await post('/incidents', manager.token, body({ severity: 'critical' }))).body.id;
+    const id = (await post('/incidents', manager.token, body({ severity: 'critical', immediateAction: 'First aid given and the horse stood down.' }))).body.id;
     await ctx.admin.query(`UPDATE incidents SET status = 'pending_closure' WHERE id = $1`, [id]);
     const res = await post(`/incidents/${id}/status`, manager.token, { status: 'closed', note: 'Done' });
     assert.equal(res.status, 403);

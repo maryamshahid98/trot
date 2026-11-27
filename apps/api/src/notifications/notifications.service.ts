@@ -1,3 +1,5 @@
+import { EVENT_KIND, PLACEHOLDERS } from './templates.ts';
+import { branchFor } from '../common/branch.ts';
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
 import type { AuthUser } from '../auth/decorators.ts';
@@ -22,6 +24,8 @@ const Preferences = z.object({ emailEnabled: z.boolean().optional(), smsEnabled:
 const IdParam = z.object({ id: z.coerce.number().int().positive() });
 
 export interface DispatchResult { sent: number; failed: number; retrying: number; skipped: number }
+
+const TemplateBody = z.object({ branchId: z.string().optional(), event: z.string().max(60), subject: z.string().trim().max(200).nullable(), body: z.string().trim().max(2000).nullable() });
 
 @Injectable()
 export class NotificationsService {
@@ -126,6 +130,43 @@ export class NotificationsService {
       await writeAudit(c, user, r.branchId, AUDIT.NOTIFICATION_RETRY, ENTITY.NOTIFICATION, String(id), {});
       return { id, status: 'queued' };
     });
+  }
+
+  /** Every message the system sends, with this branch's own wording where it has one. */
+  async templates(user: AuthUser, rawBranch?: string) {
+    const branchId = branchFor(rawBranch, user);
+    return this.db.scoped({ branchIds: [branchId], role: user.role }, async (c) => {
+      const own = new Map((await c.query(`SELECT event, subject, body FROM notification_templates WHERE branch_id = $1`, [branchId])).rows.map((r) => [r.event as string, r]));
+      return { placeholders: PLACEHOLDERS, templates: (Object.keys(EVENT_KIND) as (keyof typeof EVENT_KIND)[]).filter((e) => e !== 'auth.reset_code').map((event) => ({ event, kind: EVENT_KIND[event], subject: own.get(event)?.subject ?? null, body: own.get(event)?.body ?? null })) };
+    });
+  }
+
+  /** Sets or clears the branch's wording for one message. */
+  async setTemplate(body: unknown, user: AuthUser) {
+    const b = parse(TemplateBody, body);
+    const branchId = branchFor(b.branchId, user);
+    // The sign-in code message keeps its built-in wording, so a change of wording can never drop the code.
+    if (!Object.hasOwn(EVENT_KIND, b.event) || b.event === 'auth.reset_code') throw new NotFoundException('There is no message of that kind.');
+    return this.db.scoped({ branchIds: [branchId], role: user.role }, async (c) => {
+      if (b.subject && b.body) {
+        await c.query(`INSERT INTO notification_templates (branch_id, event, subject, body, updated_by) VALUES ($1,$2,$3,$4,$5)
+          ON CONFLICT (branch_id, event) DO UPDATE SET subject = excluded.subject, body = excluded.body, updated_by = excluded.updated_by, updated_at = now()`, [branchId, b.event, b.subject, b.body, user.id]);
+      } else await c.query(`DELETE FROM notification_templates WHERE branch_id = $1 AND event = $2`, [branchId, b.event]);
+      await writeAudit(c, user, branchId, 'notification.template', ENTITY.NOTIFICATION, b.event, { custom: !!(b.subject && b.body) });
+      return { event: b.event };
+    });
+  }
+
+  /** The reminder choices of a customer, read or changed at the desk on their request (COM-002). */
+  async customerPreferences(rawId: string, user: AuthUser, body?: unknown) {
+    const { id } = parse(z.object({ id: z.string().regex(UUID_RE, 'must be an id') }), { id: rawId });
+    const known = (await this.db.query(`SELECT 1 FROM accounts a JOIN account_branches ab ON ab.account_id = a.id WHERE a.id = $1 AND a.role = 'customer' AND ab.branch_id = ANY($2::uuid[])`, [id, user.branchIds])).rowCount;
+    if (!known) throw new NotFoundException('Customer not found.');
+    const as = { ...user, id };
+    if (body === undefined) return this.getPreferences(as);
+    const result = await this.setPreferences(body, as);
+    await this.db.tx((c) => writeAudit(c, user, user.branchIds[0], 'notification.preferences', ENTITY.ACCOUNT, id, body as object));
+    return result;
   }
 
   async getPreferences(user: AuthUser) {

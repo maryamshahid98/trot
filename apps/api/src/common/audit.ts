@@ -1,9 +1,10 @@
 import type { AuthUser } from '../auth/decorators.ts';
 
 /** Writes one audit row inside the caller's transaction, so the action and its record succeed or fail together. */
-export async function writeAudit(c: { query: (sql: string, params: unknown[]) => Promise<unknown> }, user: Pick<AuthUser, 'id'> | null, branchId: string, action: string, entity: string, entityId: string, detail: object) {
-  await c.query(`INSERT INTO audit_log (actor_account_id, branch_id, action, entity, entity_id, detail) VALUES ($1,$2,$3,$4,$5,$6)`, [
+export async function writeAudit(c: { query: (sql: string, params: unknown[]) => Promise<unknown> }, user: Pick<AuthUser, 'id' | 'source'> | null, branchId: string, action: string, entity: string, entityId: string, detail: object) {
+  await c.query(`INSERT INTO audit_log (actor_account_id, branch_id, action, entity, entity_id, detail, source) VALUES ($1,$2,$3,$4,$5,$6,$7)`, [
     user?.id ?? null, branchId, action, entity, entityId, JSON.stringify(detail), // no user = the system did it (for example an offer that timed out)
+    user ? (user.source ?? 'api') : 'system',
   ]);
 }
 

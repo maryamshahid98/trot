@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import { CurrentUser, Roles } from '../auth/decorators.ts';
 import type { AuthUser } from '../auth/decorators.ts';
 import { ROLE } from '../config/constants.ts';
@@ -18,6 +18,20 @@ export class ScheduleController {
   @Roles(ROLE.RECEPTION, ROLE.MANAGER, ROLE.OWNER)
   create(@Body() body: unknown, @CurrentUser() user: AuthUser) {
     return this.svc.create(body, user);
+  }
+
+  /** Move, re-staff or edit a session that has not started. Everything is checked again and booked riders are told. */
+  @Patch(':id')
+  @Roles(ROLE.RECEPTION, ROLE.MANAGER, ROLE.OWNER)
+  update(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.change(id, body, user);
+  }
+
+  /** Makes a draft bookable, after the same checks. */
+  @Post(':id/publish')
+  @Roles(ROLE.RECEPTION, ROLE.MANAGER, ROLE.OWNER)
+  publish(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) {
+    return this.svc.change(id, body, user, true);
   }
 
   /** A class that repeats every 1 to 4 weeks. See ScheduleService.createSeries for the all-or-nothing, skip and check-only options. */

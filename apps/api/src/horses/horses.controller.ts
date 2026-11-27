@@ -8,7 +8,7 @@ import { HorsesService } from './horses.service.ts';
 const MANAGERS = [ROLE.MANAGER, ROLE.OWNER] as const;
 const STABLE_TEAM = [ROLE.STABLE_HAND, ...MANAGERS] as const;
 const HORSE_READERS = [ROLE.COACH, ROLE.STABLE_HAND, ROLE.RECEPTION, ...MANAGERS] as const;
-const PLANNERS = [ROLE.COACH, ROLE.RECEPTION, ...MANAGERS] as const; // people who plan which horse rides in which class
+const PLANNERS = [ROLE.COACH, ROLE.STABLE_HAND, ROLE.RECEPTION, ...MANAGERS] as const; // people who plan which horse rides in which class
 
 @Controller('horses')
 export class HorsesController {
@@ -28,6 +28,12 @@ export class HorsesController {
 
   @Post(':id/status') @Roles(...STABLE_TEAM)
   status(@Param('id') id: string, @Body() b: unknown, @CurrentUser() u: AuthUser) { return this.horses.setStatus(id, b, u); }
+
+  @Get(':id/record') @Roles(...HORSE_READERS)
+  record(@Param('id') id: string, @CurrentUser() user: AuthUser) { return this.horses.record(id, user); }
+
+  @Post(':id/care') @Roles(...STABLE_TEAM)
+  care(@Param('id') id: string, @Body() body: unknown, @CurrentUser() user: AuthUser) { return this.horses.addCare(id, body, user); }
 
   @Get(':id/workload') @Roles(...HORSE_READERS)
   workload(@Param('id') id: string, @Query() q: unknown, @CurrentUser() u: AuthUser) { return this.horses.workload(id, q, u); }

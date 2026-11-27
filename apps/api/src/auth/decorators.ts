@@ -15,6 +15,10 @@ export interface AuthUser {
   mfaEnabled: boolean;
   /** The club requires it for this role and it is not set up yet: until it is, only setting it up works. */
   mfaEnrollmentRequired: boolean;
+  /** The account's own role. "role" is what this request runs as (see titles.ts). */
+  title?: Role;
+  /** Where the request came from, for the audit trail. */
+  source?: string;
 }
 
 /** Marks a route as open to people who are not signed in. Everything else requires a valid token. */

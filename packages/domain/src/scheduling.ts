@@ -7,12 +7,29 @@ export interface Override {
 }
 
 /** Problems that are never allowed, with or without an override. */
-const HARD = new Set(["BAD_TIME", "BAD_CAPACITY"]);
+const HARD = new Set(["BAD_TIME", "BAD_CAPACITY", "IN_THE_PAST"]);
+
+/** What the branch and the arena allow. Anything left out is not checked. */
+export interface SiteRules {
+  arenaCapacity?: number;
+  arenaLevels?: readonly string[];
+  minLevel?: string;
+  outsideOpeningHours?: boolean;
+  onHoliday?: boolean;
+  /** Pass the current time to refuse a session that has already started. */
+  now?: number;
+  /** A shared arena takes several sessions at once, as long as the places add up to no more than it holds. */
+  arenaShared?: boolean;
+  outsideArenaHours?: boolean;
+  /** Anything else already worked out that stands in the way (the instructor's qualifications and hours). */
+  extra?: readonly Reason[];
+}
 
 export function validateOccurrence(
   candidate: Pick<Occurrence, "id" | "startsAt" | "endsAt" | "capacity" | "arenaId" | "coachId">,
   existing: readonly Occurrence[],
   blackouts: readonly Blackout[],
+  site: SiteRules = {},
 ): Reason[] {
   const reasons: Reason[] = [];
   const add = (code: string, message: string) => reasons.push({ code, message });
@@ -21,8 +38,21 @@ export function validateOccurrence(
   if (candidate.endsAt <= candidate.startsAt) add("BAD_TIME", "The end time must be after the start time.");
   if (!Number.isInteger(candidate.capacity) || candidate.capacity < 1) add("BAD_CAPACITY", "Capacity must be at least 1.");
 
+  if (site.now !== undefined && candidate.startsAt <= site.now) add("IN_THE_PAST", "The start time has already passed.");
+  if (site.arenaCapacity !== undefined && candidate.capacity > site.arenaCapacity) add("ARENA_CAPACITY", `The arena holds at most ${site.arenaCapacity} riders.`);
+  if (site.arenaLevels && site.minLevel && !site.arenaLevels.includes(site.minLevel)) add("ARENA_LEVEL", `The arena is not approved for ${site.minLevel} riders.`);
+  if (site.outsideOpeningHours) add("OUTSIDE_HOURS", "This is outside the branch's opening hours.");
+  if (site.onHoliday) add("HOLIDAY", "The branch is closed for a holiday that day.");
+
   const live = existing.filter((o) => o.id !== candidate.id && o.status !== "cancelled");
-  if (live.some((o) => o.arenaId === candidate.arenaId && overlaps(o, candidate))) add("ARENA_OVERLAP", "The arena is already booked at this time.");
+  const sameArena = live.filter((o) => o.arenaId === candidate.arenaId && overlaps(o, candidate));
+  if (!site.arenaShared) {
+    if (sameArena.length) add("ARENA_OVERLAP", "The arena is already booked at this time.");
+  } else if (site.arenaCapacity !== undefined && sameArena.reduce((n, o) => n + o.capacity, candidate.capacity) > site.arenaCapacity) {
+    add("ARENA_SHARED_FULL", `Together these sessions need more than the ${site.arenaCapacity} places the arena holds.`);
+  }
+  if (site.outsideArenaHours) add("OUTSIDE_ARENA_HOURS", "This is outside the arena's hours.");
+  reasons.push(...(site.extra ?? []));
   if (live.some((o) => o.coachId === candidate.coachId && overlaps(o, candidate))) add("COACH_OVERLAP", "The coach already has a class at this time.");
 
   for (const b of blackouts) {
