@@ -117,7 +117,7 @@ test('uploaded documents go to ./data/uploads with a 5 MB limit unless told othe
   assert.equal(c.uploads.dir, './data/uploads');
   assert.equal(c.uploads.maxBytes, 5_242_880);
   const custom = loadConfig(withEnv({ UPLOAD_DIR: '/data/uploads', UPLOAD_MAX_BYTES: '1048576' }));
-  assert.deepEqual(custom.uploads, { dir: '/data/uploads', maxBytes: 1_048_576 });
+  assert.deepEqual(custom.uploads, { dir: '/data/uploads', maxBytes: 1_048_576, s3: null });
   assert.match(messageOf(() => loadConfig(withEnv({ UPLOAD_MAX_BYTES: 'big' }))), /UPLOAD_MAX_BYTES/);
   assert.match(messageOf(() => loadConfig(withEnv({ UPLOAD_MAX_BYTES: '0' }))), /UPLOAD_MAX_BYTES/);
   assert.match(messageOf(() => loadConfig(withEnv({ UPLOAD_MAX_BYTES: '99999999999' }))), /UPLOAD_MAX_BYTES/);

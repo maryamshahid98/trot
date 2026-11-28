@@ -163,14 +163,13 @@ export class IncidentsService {
   async file(rawId: string, rawFileId: string, user: AuthUser): Promise<StreamableFile> {
     const { id, fileId } = parse(FileParams, { id: rawId, fileId: rawFileId });
     await this.get(id, user); // only someone who may see the incident
-    const { row, bytes } = await this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
-      const x = (await c.query(`SELECT f.file_key AS key, f.file_name AS name, f.file_type AS type, f.file_sha256 AS sha, i.branch_id AS "branchId" FROM incident_files f JOIN incidents i ON i.id = f.incident_id WHERE f.id = $1 AND f.incident_id = $2`, [fileId, id])).rows[0];
-      const stored = x ? await this.files.read(x.key) : undefined;
-      if (!x || !stored) throw new NotFoundException('File not found.');
-      if (sha256(stored) !== x.sha) throw new ConflictException('The stored file does not match its fingerprint, so it was not sent.');
-      await writeAudit(c, user, x.branchId, 'incident.file_view', ENTITY.INCIDENT, id, { fileId });
-      return { row: x, bytes: stored };
-    });
+    const scope = { branchIds: user.branchIds, role: user.role };
+    // As for rider documents: no database connection is held while the file is fetched.
+    const row = await this.db.scoped(scope, async (c) => (await c.query(`SELECT f.file_key AS key, f.file_name AS name, f.file_type AS type, f.file_sha256 AS sha, i.branch_id AS "branchId" FROM incident_files f JOIN incidents i ON i.id = f.incident_id WHERE f.id = $1 AND f.incident_id = $2`, [fileId, id])).rows[0]);
+    const bytes = row ? await this.files.read(row.key) : null;
+    if (!row || !bytes) throw new NotFoundException('File not found.');
+    if (sha256(bytes) !== row.sha) throw new ConflictException('The stored file does not match its fingerprint, so it was not sent.');
+    await this.db.scoped(scope, (c) => writeAudit(c, user, row.branchId, 'incident.file_view', ENTITY.INCIDENT, id, { fileId }));
     const ascii = String(row.name).replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
     return new StreamableFile(bytes, { type: row.type, disposition: `attachment; filename="${ascii}"`, length: bytes.length });
   }

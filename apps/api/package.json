@@ -13,9 +13,13 @@
     "test": "npm run db:test-setup && tsx --env-file-if-exists=../../.env --test test/*.test.ts",
     "db:migrate": "tsx --env-file-if-exists=../../.env scripts/migrate.ts migrate",
     "db:seed": "tsx --env-file-if-exists=../../.env scripts/migrate.ts seed",
+    "storage:check": "tsx --env-file-if-exists=../../.env scripts/storage.ts check",
+    "storage:create-bucket": "tsx --env-file-if-exists=../../.env scripts/storage.ts create-bucket",
+    "storage:copy-to-s3": "tsx --env-file-if-exists=../../.env scripts/storage.ts copy-to-s3",
     "db:test-setup": "tsx --env-file-if-exists=../../.env scripts/migrate.ts test-setup"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1179.0",
     "@nestjs/common": "^11.2.11",
     "@nestjs/core": "^11.2.11",
     "@nestjs/platform-express": "^11.2.11",

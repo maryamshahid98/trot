@@ -7,6 +7,7 @@
 //  - A value that is not a number, or is out of range, stops the start. It never quietly turns a protection off.
 import { z } from 'zod';
 import { ROLES, TEST_DATABASE_SUFFIX } from './constants.ts';
+import type { S3Settings } from '../riders/s3-storage.ts';
 
 export const APP_CONFIG = 'APP_CONFIG';
 
@@ -24,6 +25,7 @@ const postgresUrl = z
   .refine((s) => /^postgres(ql)?:\/\/.+/.test(s), 'must be a postgres:// connection URL');
 
 const RuntimeEnv = z.object({
+  NODE_ENV: z.preprocess(blankIsUnset, z.enum(['development', 'test', 'production']).default('development')),
   PORT: int(1, 65535, 3000),
 
   DATABASE_URL: postgresUrl,
@@ -59,6 +61,15 @@ const RuntimeEnv = z.object({
   // Where uploaded rider documents are kept, and the largest file accepted. Use a folder that is backed up and survives a restart.
   UPLOAD_DIR: text('./data/uploads'),
   UPLOAD_MAX_BYTES: int(1_024, 26_214_400, 5_242_880),
+  // "local" keeps the files in UPLOAD_DIR. "s3" keeps them in a private Amazon S3 bucket (or a service that works like it).
+  STORAGE_DRIVER: z.preprocess(blankIsUnset, z.enum(['local', 's3']).default('local')),
+  S3_BUCKET: optionalText(3),
+  S3_REGION: optionalText(2),
+  S3_ENDPOINT: z.preprocess(blankIsUnset, z.string().refine((s) => /^https?:\/\/[^/\s]+/.test(s), 'must be an address such as http://127.0.0.1:8333').optional()),
+  S3_FORCE_PATH_STYLE: flag(false), // true for most services that are not Amazon
+  S3_PREFIX: z.preprocess(blankIsUnset, z.string().max(100).regex(/^([A-Za-z0-9._-]+\/)*$/, 'must end with a slash, such as staging/').default('')),
+  S3_ACCESS_KEY_ID: optionalText(3),
+  S3_SECRET_ACCESS_KEY: optionalText(8),
 
   // Two-step sign-in. Anyone may switch it on for their own account. These roles MUST: until they have set it up they can sign in but do
   // nothing except set it up. Comma separated, for example: owner,manager. Blank = nobody is forced.
@@ -84,6 +95,15 @@ const RuntimeEnv = z.object({
   const roles = e.MFA_REQUIRED_ROLES.split(',').map((s) => s.trim()).filter(Boolean);
   const unknown = roles.filter((r) => !(ROLES as readonly string[]).includes(r));
   if (unknown.length) ctx.addIssue({ code: 'custom', path: ['MFA_REQUIRED_ROLES'], message: `has unknown roles: ${unknown.join(', ')}. Use any of: ${ROLES.join(', ')}` });
+  if (e.STORAGE_DRIVER === 's3') {
+    const missing = (name: 'S3_BUCKET' | 'S3_REGION' | 'S3_ACCESS_KEY_ID' | 'S3_SECRET_ACCESS_KEY', why: string) => { if (!e[name]) ctx.addIssue({ code: 'custom', path: [name], message: why }); };
+    missing('S3_BUCKET', 'is required when STORAGE_DRIVER=s3');
+    missing('S3_REGION', 'is required when STORAGE_DRIVER=s3');
+    if (e.S3_ACCESS_KEY_ID) missing('S3_SECRET_ACCESS_KEY', 'is required with S3_ACCESS_KEY_ID');
+    if (e.S3_SECRET_ACCESS_KEY) missing('S3_ACCESS_KEY_ID', 'is required with S3_SECRET_ACCESS_KEY');
+    // Medical documents must not cross a network unencrypted.
+    if (e.NODE_ENV === 'production' && e.S3_ENDPOINT?.startsWith('http://')) ctx.addIssue({ code: 'custom', path: ['S3_ENDPOINT'], message: 'must use https in production' });
+  }
   if (e.NOTIFY_EMAIL === 'smtp') {
     if (!e.SMTP_HOST) ctx.addIssue({ code: 'custom', path: ['SMTP_HOST'], message: 'is required when NOTIFY_EMAIL=smtp' });
     if (!e.EMAIL_FROM) ctx.addIssue({ code: 'custom', path: ['EMAIL_FROM'], message: 'is required when NOTIFY_EMAIL=smtp' });
@@ -109,7 +129,8 @@ export interface AppConfig {
   rateLimit: { authMax: number; generalMax: number; windowMs: number; keyPrefix: string };
   http: { corsOrigins: string[]; trustProxy: number; hstsMaxAgeSeconds: number };
   jobs: { intervalSeconds: number };
-  uploads: { dir: string; maxBytes: number };
+  /** s3 is null while files are kept in the local folder. */
+  uploads: { dir: string; maxBytes: number; s3: S3Settings | null };
   notifications: {
     email: 'log' | 'smtp' | 'off';
     sms: 'log' | 'off';
@@ -154,7 +175,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       hstsMaxAgeSeconds: e.HSTS_MAX_AGE_SECONDS,
     },
     jobs: { intervalSeconds: e.JOBS_INTERVAL_SECONDS },
-    uploads: { dir: e.UPLOAD_DIR, maxBytes: e.UPLOAD_MAX_BYTES },
+    uploads: {
+      dir: e.UPLOAD_DIR, maxBytes: e.UPLOAD_MAX_BYTES,
+      s3: e.STORAGE_DRIVER === 's3'
+        ? { bucket: e.S3_BUCKET!, region: e.S3_REGION!, endpoint: e.S3_ENDPOINT, forcePathStyle: e.S3_FORCE_PATH_STYLE, prefix: e.S3_PREFIX, accessKeyId: e.S3_ACCESS_KEY_ID, secretAccessKey: e.S3_SECRET_ACCESS_KEY }
+        : null,
+    },
     notifications: {
       email: e.NOTIFY_EMAIL, sms: e.NOTIFY_SMS,
       smtp: e.SMTP_HOST ? { host: e.SMTP_HOST, port: e.SMTP_PORT, secure: e.SMTP_SECURE, user: e.SMTP_USER, pass: e.SMTP_PASS } : null,

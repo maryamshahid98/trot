@@ -20,6 +20,17 @@ services:
       retries: 10
     # The database starts EMPTY. Create the tables with: npm run db:migrate (in apps/api), or see docs/deployment.md.
 
+  # A free S3-compatible service for development only, so file storage can be tried without an Amazon account:
+  #   docker compose --profile s3 up -d      (it listens on this computer only and accepts any key: never use it in production)
+  s3:
+    profiles: ["s3"]
+    image: chrislusf/seaweedfs:4.55
+    command: server -s3 -dir=/data -ip.bind=0.0.0.0
+    ports:
+      - "127.0.0.1:8333:8333"
+    volumes:
+      - trot-s3:/data
+
   api:
     profiles: ["app"]
     build:
@@ -62,3 +73,4 @@ services:
 volumes:
   trot-data:
   trot-uploads:
+  trot-s3:
