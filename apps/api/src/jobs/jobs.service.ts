@@ -42,16 +42,22 @@ export class JobsService implements OnApplicationBootstrap, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
+  /** One scheduled run over every branch. Returns undefined when another server is already doing it. */
+  async runScheduled(): Promise<JobResult | undefined> {
+    // With several API servers on one database, only one of them runs the clean-up at a time.
+    return this.db.withAdvisoryLock(LIMITS.jobAdvisoryLockKey, async () => {
+      const all = (await this.db.query(`SELECT id::text FROM branches WHERE active`)).rows.map((r) => r.id as string);
+      const r = await this.run(all, Date.now());
+      if (r.holdsReleased + r.offersPassedOn + r.packagesExpired > 0) this.log.log(`Background job: ${JSON.stringify(r)}`);
+      return r;
+    });
+  }
+
   private async runTimed() {
     if (this.running) return; // the last run is still going
     this.running = true;
     try {
-      // With several API servers on one database, only one of them runs the clean-up at a time.
-      await this.db.withAdvisoryLock(LIMITS.jobAdvisoryLockKey, async () => {
-        const all = (await this.db.query(`SELECT id::text FROM branches WHERE active`)).rows.map((r) => r.id as string);
-        const r = await this.run(all, Date.now());
-        if (r.holdsReleased + r.offersPassedOn + r.packagesExpired > 0) this.log.log(`Background job: ${JSON.stringify(r)}`);
-      });
+      await this.runScheduled();
     } catch (e: unknown) {
       this.log.error(`Background job failed: ${errorMessage(e)}`);
     } finally {

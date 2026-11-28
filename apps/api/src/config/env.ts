@@ -57,6 +57,11 @@ const RuntimeEnv = z.object({
 
   // How often the background job runs: it releases unpaid holds, passes on unanswered waitlist offers and expires old packages. 0 = off.
   JOBS_INTERVAL_SECONDS: int(0, 86_400, 60),
+  // Where there is no long-running server, an outside scheduler calls GET /internal/jobs with "Authorization: Bearer <this>".
+  // Blank = that address does not exist.
+  CRON_SECRET: optionalText(16),
+  // Set when browsers reach the API under a path on the website's own address, such as /api. The sign-in cookie needs to know.
+  PUBLIC_API_PATH: z.preprocess(blankIsUnset, z.string().regex(/^(\/[A-Za-z0-9_-]+)+$/, 'must look like /api').default('')),
 
   // Where uploaded rider documents are kept, and the largest file accepted. Use a folder that is backed up and survives a restart.
   UPLOAD_DIR: text('./data/uploads'),
@@ -120,6 +125,8 @@ export interface AppConfig {
     accessTtlSeconds: number;
     refreshTtlDays: number;
     cookieSecure: boolean;
+    /** The path browsers put in front of the API's addresses, or '' when the API has an address of its own. */
+    publicApiPath: string;
     mfaRequiredRoles: string[];
     mfaEncryptionKey: string;
     mfaIssuer: string;
@@ -128,7 +135,7 @@ export interface AppConfig {
   };
   rateLimit: { authMax: number; generalMax: number; windowMs: number; keyPrefix: string };
   http: { corsOrigins: string[]; trustProxy: number; hstsMaxAgeSeconds: number };
-  jobs: { intervalSeconds: number };
+  jobs: { intervalSeconds: number; cronSecret: string | null };
   /** s3 is null while files are kept in the local folder. */
   uploads: { dir: string; maxBytes: number; s3: S3Settings | null };
   notifications: {
@@ -162,6 +169,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       accessTtlSeconds: e.ACCESS_TOKEN_TTL_SECONDS,
       refreshTtlDays: e.REFRESH_TOKEN_TTL_DAYS,
       cookieSecure: e.COOKIE_SECURE,
+      publicApiPath: e.PUBLIC_API_PATH,
       mfaRequiredRoles: e.MFA_REQUIRED_ROLES.split(',').map((s) => s.trim()).filter(Boolean),
       mfaEncryptionKey: e.MFA_ENCRYPTION_KEY ?? e.JWT_SECRET,
       mfaIssuer: e.MFA_ISSUER,
@@ -174,7 +182,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       trustProxy: e.TRUST_PROXY,
       hstsMaxAgeSeconds: e.HSTS_MAX_AGE_SECONDS,
     },
-    jobs: { intervalSeconds: e.JOBS_INTERVAL_SECONDS },
+    jobs: { intervalSeconds: e.JOBS_INTERVAL_SECONDS, cronSecret: e.CRON_SECRET ?? null },
     uploads: {
       dir: e.UPLOAD_DIR, maxBytes: e.UPLOAD_MAX_BYTES,
       s3: e.STORAGE_DRIVER === 's3'

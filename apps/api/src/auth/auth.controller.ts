@@ -26,7 +26,7 @@ export class AuthController {
   private deliver<T extends object>(req: ApiRequest, res: ApiResponse, result: T): Omit<T, 'refreshToken'> | T {
     const refreshToken = (result as { refreshToken?: string }).refreshToken; // a two-step sign-in's first answer has none yet
     if (!isWebClient(req) || !refreshToken) return result;
-    setRefreshCookie(res, refreshToken, this.config.auth.refreshTtlDays, this.config.auth.cookieSecure);
+    setRefreshCookie(res, refreshToken, this.config.auth.refreshTtlDays, this.config.auth);
     const { refreshToken: _omit, ...rest } = result as T & { refreshToken?: string };
     return rest;
   }
@@ -51,7 +51,7 @@ export class AuthController {
     try {
       return this.deliver(req, res, await this.auth.refresh(token, req.headers['user-agent']));
     } catch (err) {
-      if (web) clearRefreshCookie(res, this.config.auth.cookieSecure);
+      if (web) clearRefreshCookie(res, this.config.auth);
       throw err;
     }
   }
@@ -63,7 +63,7 @@ export class AuthController {
   async logout(@Body() body: unknown, @Req() req: ApiRequest, @Res({ passthrough: true }) res: ApiResponse) {
     const web = isWebClient(req);
     const token = web ? readCookie(req, REFRESH_COOKIE.name) : parse(RefreshBody, body).refreshToken;
-    if (web) clearRefreshCookie(res, this.config.auth.cookieSecure);
+    if (web) clearRefreshCookie(res, this.config.auth);
     return token ? this.auth.logout(token) : { ok: true };
   }
 

@@ -17,11 +17,14 @@ export function readCookie(req: ApiRequest, name: string): string | undefined {
   return undefined;
 }
 
-const base = (secure: boolean) => ({ httpOnly: true, secure, sameSite: REFRESH_COOKIE.sameSite, path: REFRESH_COOKIE.path });
+export interface CookieSettings { cookieSecure: boolean; publicApiPath: string }
 
-export function setRefreshCookie(res: ApiResponse, token: string, ttlDays: number, secure: boolean): void {
-  res.cookie(REFRESH_COOKIE.name, token, { ...base(secure), maxAge: ttlDays * 86_400_000 });
+// The browser sends the cookie only to the sign-in addresses, as the browser sees them (under publicApiPath if there is one).
+const base = (s: CookieSettings) => ({ httpOnly: true, secure: s.cookieSecure, sameSite: REFRESH_COOKIE.sameSite, path: `${s.publicApiPath}${REFRESH_COOKIE.path}` });
+
+export function setRefreshCookie(res: ApiResponse, token: string, ttlDays: number, s: CookieSettings): void {
+  res.cookie(REFRESH_COOKIE.name, token, { ...base(s), maxAge: ttlDays * 86_400_000 });
 }
-export function clearRefreshCookie(res: ApiResponse, secure: boolean): void {
-  res.clearCookie(REFRESH_COOKIE.name, base(secure));
+export function clearRefreshCookie(res: ApiResponse, s: CookieSettings): void {
+  res.clearCookie(REFRESH_COOKIE.name, base(s));
 }
