@@ -118,16 +118,17 @@ export class DocumentsService {
    * The file is checked against the fingerprint taken when it was saved.
    */
   async readFile(rawId: string, user: AuthUser): Promise<StreamableFile> {
-    const { d, bytes } = await this.db.scoped({ branchIds: user.branchIds, role: user.role }, async (c) => {
+    const scope = { branchIds: user.branchIds, role: user.role };
+    // Permission first, then fetch the file with no database connection held (it may travel from S3), then record the viewing.
+    const { d, stored } = await this.db.scoped(scope, async (c) => {
       const row = await this.visible(c, rawId, user, false);
       if (!row.fileKey) throw new NotFoundException('This document has no file.');
-      const stored = (await c.query(`SELECT file_sha256 AS "sha" FROM rider_documents WHERE id = $1`, [row.id])).rows[0].sha as string;
-      const data = await this.files.read(row.fileKey);
-      if (!data) throw new NotFoundException('The file is missing from storage.');
-      if (sha256(data) !== stored) throw new ConflictException('The stored file does not match its fingerprint, so it was not sent.');
-      await writeAudit(c, user, row.branchId, AUDIT.DOCUMENT_FILE_VIEW, ENTITY.DOCUMENT, row.id, { riderId: row.riderId, kind: row.kind });
-      return { d: row, bytes: data };
+      return { d: row, stored: (await c.query(`SELECT file_sha256 AS "sha" FROM rider_documents WHERE id = $1`, [row.id])).rows[0].sha as string };
     });
+    const bytes = await this.files.read(d.fileKey!);
+    if (!bytes) throw new NotFoundException('The file is missing from storage.');
+    if (sha256(bytes) !== stored) throw new ConflictException('The stored file does not match its fingerprint, so it was not sent.');
+    await this.db.scoped(scope, (c) => writeAudit(c, user, d.branchId, AUDIT.DOCUMENT_FILE_VIEW, ENTITY.DOCUMENT, d.id, { riderId: d.riderId, kind: d.kind }));
     const asciiName = String(d.fileName).replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '');
     return new StreamableFile(bytes, { type: d.fileType, disposition: `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(d.fileName)}`, length: bytes.length });
   }

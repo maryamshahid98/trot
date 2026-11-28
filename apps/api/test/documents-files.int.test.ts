@@ -1,12 +1,11 @@
 // Document files: only real PDF/JPEG/PNG, the right people only, every viewing logged, and nothing the client says decides where a file lives.
 import { after, before, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import { api, ctx, makeBranch, startApp, stopApp } from './helpers.ts';
 import type { Json } from './helpers.ts';
 import { auditActions, customer, staff } from './flow-helpers.ts';
+import { APP_CONFIG } from '../src/config/env.ts';
+import { createFileStorage } from '../src/riders/storage-provider.ts';
 
 before(startApp);
 after(stopApp);
@@ -37,7 +36,8 @@ const newDoc = async (token: string, riderId: string, kind = 'medical_form'): Pr
   return r.body.id;
 };
 const fileKeyOf = async (docId: string): Promise<string | null> => (await ctx.admin.query(`SELECT file_key FROM rider_documents WHERE id = $1`, [docId])).rows[0].file_key;
-const uploadDir = () => path.resolve(process.env.UPLOAD_DIR as string);
+/** The storage the API itself is using (local folder, or S3 when the tests are run with STORAGE_DRIVER=s3). */
+const storage = () => createFileStorage(ctx.app.get(APP_CONFIG));
 
 describe('attaching a file', () => {
   test('a family member attaches a PDF, a JPEG and a PNG; staff download exactly the same bytes', async () => {
@@ -189,10 +189,9 @@ describe('the file is only ever found through the server\'s own key', () => {
     const doc = await newDoc(fam.token, fam.riderId);
     await upload(doc, fam.token, PDF);
     const key = String(await fileKeyOf(doc));
-    const file = path.join(uploadDir(), key.slice(0, 2), key);
-    assert.ok(existsSync(file), 'the file is where the key says');
-    assert.ok((await readFile(file)).equals(PDF));
-    await writeFile(file, Buffer.concat([PDF, Buffer.from('tampered')]));
+    assert.ok((await storage().read(key))?.equals(PDF), 'the file is where the key says');
+    await storage().remove(key);
+    await storage().save(key, Buffer.concat([PDF, Buffer.from('tampered')]));
     const r = await download(doc, fam.token);
     assert.equal(r.status, 409);
     assert.ok(!(await auditActions(doc)).includes('document.file_view'));
@@ -203,7 +202,7 @@ describe('the file is only ever found through the server\'s own key', () => {
     const doc = await newDoc(fam.token, fam.riderId);
     await upload(doc, fam.token, PDF);
     const key = String(await fileKeyOf(doc));
-    await (await import('node:fs/promises')).rm(path.join(uploadDir(), key.slice(0, 2), key));
+    await storage().remove(key);
     assert.equal((await download(doc, fam.token)).status, 404);
   });
 });

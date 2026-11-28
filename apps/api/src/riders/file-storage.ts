@@ -7,7 +7,7 @@ import type { AppConfig } from '../config/env.ts';
 
 export const FILE_STORAGE = 'FILE_STORAGE';
 
-/** Where uploaded files live. The only implementation today is a folder on disk; another (object storage) can replace it without touching callers. */
+/** Where uploaded files live: a folder on disk (below) or an S3 bucket (s3-storage.ts). Callers do not know which. */
 export interface FileStorage {
   save(key: string, data: Buffer): Promise<void>;
   /** The file, or null when there is no such file. */
@@ -18,6 +18,12 @@ export interface FileStorage {
 /** Keys are made by the server (a UUID). Anything else is refused, so a key can never be used to reach outside the folder. */
 const KEY_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+/** Where a file sits inside any storage: a short folder from the start of its name, then the name. Refuses names the server did not make. */
+export function fileLocation(key: string): string {
+  if (!KEY_RE.test(key)) throw new Error('Invalid file key.');
+  return `${key.slice(0, 2)}/${key}`;
+}
+
 @Injectable()
 export class LocalFileStorage implements FileStorage {
   private readonly root: string;
@@ -27,8 +33,7 @@ export class LocalFileStorage implements FileStorage {
   }
 
   private pathFor(key: string): string {
-    if (!KEY_RE.test(key)) throw new Error('Invalid file key.');
-    return path.join(this.root, key.slice(0, 2), key);
+    return path.join(this.root, fileLocation(key));
   }
 
   async save(key: string, data: Buffer): Promise<void> {

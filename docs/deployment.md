@@ -68,6 +68,31 @@ only keeps where each one is and a fingerprint of its contents.
 - Reception, managers, owners and the rider's own family can open a file. Every opening is recorded in the audit log.
 - **Files are not scanned for viruses.** If that matters to the club, scan on upload in front of the API.
 
+## Keeping the files in Amazon S3 instead
+
+Use this when you run more than one API server, or do not want to look after a disk. The database still records each file; only
+the files themselves move. Set `STORAGE_DRIVER=s3`, `S3_BUCKET` and `S3_REGION`.
+
+1. **Create a bucket** in the region you have chosen. Keep **Block all public access** on, and add no public bucket policy.
+2. **Turn on Versioning**, so a deleted or replaced file can be recovered. New objects are encrypted at rest by Amazon by default.
+3. **Give the API only what it needs.** Prefer an IAM role on the server (leave both key settings blank). The policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    { "Effect": "Allow", "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], "Resource": "arn:aws:s3:::YOUR-BUCKET/*" },
+    { "Effect": "Allow", "Action": "s3:ListBucket", "Resource": "arn:aws:s3:::YOUR-BUCKET" }
+  ]
+}
+```
+
+   `s3:ListBucket` lets a missing file be reported as missing instead of "access denied".
+4. **Check it** from `apps/api`: `npm run storage:check`.
+5. **Existing files:** with the same settings and `ADMIN_DATABASE_URL`, run `npm run storage:copy-to-s3` where the old
+   `UPLOAD_DIR` can be read. It verifies every file against its fingerprint, keeps the originals and can be run again.
+   Stop uploads while you switch over, and remove the old folder only after you have checked and backed up the bucket.
+
 ## Messages (email)
 
 Bookings, payments, cancellations, waitlist offers, class reminders, expiring packages and documents, and serious incidents each
